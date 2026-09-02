@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "forge-protocol",
   "version": "0.3.0",
-  "description": "Anti-deskilling framework: four interaction modes (Forge, Anvil, Crucible, Executor) that protect human thinking skills when working with AI. Needs no API key — runs on your Claude Code subscription.",
+  "description": "Anti-deskilling plugin with four interaction modes that protect human judgment. Compatible with Claude Code and Codex.",
   "author": {
     "name": "Lorenzo Famiglini",
     "email": "lorenzofamiglini@gmail.com"
@@ -15,6 +15,7 @@
     "socratic",
     "metacognition",
     "critique",
-    "thinking"
+    "thinking",
+    "codex"
   ]
 }
