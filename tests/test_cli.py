@@ -1,11 +1,11 @@
 """Tests for the `forge` CLI in `forge_cc.cli`.
 
-Claude Code skills are prompts, not code — they change protocol state by
+Plugin skills are prompts, not code — they change protocol state by
 shelling out to this CLI and reading the JSON it prints. So the contract under
 test is twofold: the JSON shape each subcommand emits, and the read/write
 separation. `state`, `rules`, `checkpoint`, `report` and `canary trend` are
 read-only; only `set-mode`, `canary submit`, `report --record` and
-`audit-done` may mutate anything. `/forge-status` opens a dashboard on every
+`audit-done` may mutate anything. The status skill opens a dashboard on every
 turn, and a dashboard that silently consumed a pending checkpoint or cleared
 an overdue audit reminder would quietly defeat the protocol.
 
@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
 import sys
 
 import pytest
@@ -88,6 +90,29 @@ def test_doctor_sees_an_available_auditor(capsys, tmp_path, monkeypatch):
     assert out["auditor"]["enabled"] is True
     assert out["auditor"]["available"] is True
     assert out["auditor"]["command"] == str(fake)
+
+
+def test_codex_plugin_root_takes_precedence(tmp_path):
+    codex_root = tmp_path / "codex-plugin"
+    claude_root = tmp_path / "claude-plugin"
+    (codex_root / "modes").mkdir(parents=True)
+    (claude_root / "modes").mkdir(parents=True)
+    env = os.environ.copy()
+    env.update({
+        "PLUGIN_ROOT": str(codex_root),
+        "CLAUDE_PLUGIN_ROOT": str(claude_root),
+        "PYTHONPATH": str(paths.PLUGIN_ROOT),
+    })
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from forge_cc.paths import PLUGIN_ROOT; print(PLUGIN_ROOT)"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.stdout.strip() == str(codex_root.resolve())
 
 
 # ---------------------------------------------------------------------------

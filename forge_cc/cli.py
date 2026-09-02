@@ -1,12 +1,12 @@
-"""The `forge` CLI — what the slash-command skills shell out to.
+"""The `forge` CLI — what plugin skills shell out to.
 
-Claude Code skills are prompts, not code: they drive state changes by calling
+Plugin skills are prompts, not code: they drive state changes by calling
 this CLI through the Bash tool. Every subcommand prints one JSON object to
 stdout (except `soul`, which prints markdown) so the model can read the result
 without parsing prose.
 
 Read/write separation is deliberate. `state`, `checkpoint`, `rules`, `report`
-and `canary trend` never mutate anything, so `/forge-status` can show a
+and `canary trend` never mutate anything, so the status skill can show a
 dashboard without consuming a pending checkpoint or silently clearing an
 overdue audit reminder. Mutation is opt-in: `set-mode`, `canary submit`,
 `report --record`, `audit-done`.
@@ -178,7 +178,7 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
 
     if forced:
         # Auditable rather than silent: a forced relaxation shows up in
-        # /forge-status and in the quarterly dependency report.
+        # the status skill and in the quarterly dependency report.
         sm.log_violation(
             session.session_id,
             previous,
@@ -419,7 +419,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="forge",
-        description="Forge Protocol state and audit CLI (Claude Code port).",
+        description="Forge Protocol state and audit CLI.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

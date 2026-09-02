@@ -1,6 +1,6 @@
 ---
 name: forge-mode
-description: Switch to Forge mode — a Socratic thinking partner that asks questions instead of answering. Use when the user runs /forge-mode or says "help me think through this", "be my thinking partner", "don't just tell me the answer", or brings a strategy, planning, or architecture decision they should reason out themselves.
+description: Switch to Forge mode — a Socratic thinking partner that asks questions instead of answering. Use when the user invokes forge-mode ($forge-mode in Codex, /forge-mode in Claude Code), says "help me think through this", "be my thinking partner", or brings a decision they should reason out themselves.
 ---
 
 # Forge Mode — Socratic Thinking Partner

@@ -1,6 +1,6 @@
 ---
 name: anvil-mode
-description: Switch to Anvil mode — a rigorous editor that rates your draft on 6 dimensions and never rewrites it. Use when the user runs /anvil-mode or says "critique my draft", "review this essay/email/PR/proposal", "tear this apart", or wants structured feedback on writing they did themselves rather than a rewrite.
+description: Switch to Anvil mode — a rigorous editor that rates a draft on 6 dimensions and never rewrites it. Use when the user invokes anvil-mode ($anvil-mode in Codex, /anvil-mode in Claude Code), says "critique my draft" or wants structured feedback on work they wrote themselves.
 ---
 
 # Anvil Mode — Rigorous Editor & Critic

@@ -1,8 +1,8 @@
 """Hook policy for the Forge Protocol.
 
 The Hermes port exposed nine tools the orchestrator could *choose* to call.
-Claude Code lets the harness run this logic unconditionally, which is the
-whole point of the port: enforcement stops depending on the model's goodwill.
+Codex and Claude Code run this logic through lifecycle hooks, so enforcement
+does not depend on the model choosing to invoke it.
 
 Mapping from the old plugin tools to hook events:
 
@@ -15,7 +15,7 @@ Mapping from the old plugin tools to hook events:
     (new)                 -> PreToolUse write-lock
 
 Every handler is a plain function from payload dict to output dict, so the
-tests drive them directly without spawning Claude Code.
+tests drive them directly without spawning either host.
 """
 
 from __future__ import annotations
@@ -357,9 +357,9 @@ def session_start(payload: dict[str, Any]) -> dict[str, Any]:
         f"Messages this session: {session.message_count}",
         f"FORGE_CLI: {cli_path()}",
         "",
-        "Switch modes with `/forge-mode`, `/anvil-mode`, `/crucible-mode`, "
-        "`/executor-mode`. `/forge-status` shows state; `/forge-audit` runs a "
-        "self-audit.",
+        "Switch modes with the forge-mode, anvil-mode, crucible-mode or "
+        "executor-mode skill. Use `$skill-name` in Codex and `/skill-name` in "
+        "Claude Code. forge-status shows state; forge-audit runs a self-audit.",
     ]
 
     if session.current_mode in THINKING_MODES:
@@ -664,7 +664,7 @@ def pre_tool_use(payload: dict[str, Any]) -> dict[str, Any]:
         f"{rationale}\n"
         "Writing the file through a shell redirect instead of the Write tool is "
         "the same violation. Describe what needs to change and let the user "
-        "write it, or switch to `/executor-mode` if this is genuinely a "
+        "write it, or invoke the executor-mode skill if this is genuinely a "
         "mechanical task."
     )
 

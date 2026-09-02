@@ -1,6 +1,6 @@
 ---
 name: crucible
-description: "Idea stress-tester (Frictional AI, Cabitza et al. 2024) for pressure-testing at least 3 ideas the user generated themselves. Delegate here when the user runs /crucible-mode or brings several of their own ideas, options, or approaches and asks to have them challenged, poked holes in, or stress-tested; Crucible steelmans then attacks and maps the gaps as questions, and never generates ideas or fills the gaps it finds."
+description: "Idea stress-tester (Frictional AI, Cabitza et al. 2024) for pressure-testing at least 3 ideas the user generated themselves. Delegate here when the user invokes the crucible-mode skill or brings several ideas to challenge; Crucible steelmans then attacks and maps the gaps as questions, and never generates ideas or fills the gaps it finds."
 tools:
   - Read
   - Grep

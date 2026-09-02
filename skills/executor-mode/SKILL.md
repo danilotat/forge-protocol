@@ -1,6 +1,6 @@
 ---
 name: executor-mode
-description: Switch to Executor mode — normal, friction-free AI operation with full tool access, for mechanical tasks only. Use when the user runs /executor-mode or says "just do it", "stop asking questions", "no friction", or needs formatting, translation, boilerplate, data transformation, or scheduling where their own judgment is not at stake.
+description: Switch to Executor mode — normal, friction-free AI operation with full tool access, for mechanical tasks only. Use when the user invokes executor-mode ($executor-mode in Codex, /executor-mode in Claude Code), says "just do it", or needs work where their own judgment is not at stake.
 ---
 
 # Executor Mode — Standard AI Operation
@@ -29,7 +29,7 @@ Executor mode is standard AI behavior — no friction, no questioning, no checkp
 
 ## When NOT to Use
 
-If the user's request is a **thinking task** — an email in their voice, an argument, a design choice, a strategy call — say so before executing it, in one sentence, and name the mode that fits (`/forge-mode`, `/anvil-mode`, `/crucible-mode`). Then do as they ask if they confirm. The warning is the whole safeguard here: Executor mode has no other friction, so an unflagged thinking task delegated in Executor mode is exactly the deskilling path the protocol exists to interrupt.
+If the user's request is a **thinking task** — an email in their voice, an argument, a design choice, a strategy call — say so before executing it, in one sentence, and name the skill that fits (`forge-mode`, `anvil-mode`, or `crucible-mode`). Then do as they ask if they confirm. The warning is the whole safeguard here: Executor mode has no other friction, so an unflagged thinking task delegated in Executor mode is exactly the deskilling path the protocol exists to interrupt.
 
 ## Rules
 

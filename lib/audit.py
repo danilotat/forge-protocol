@@ -56,7 +56,8 @@ def check_audit_reminders(session: Session) -> list[AuditReminder]:
                 audit_type="canary",
                 message=(
                     f"Weekly canary check is {days_overdue} days overdue. "
-                    "Run /forge-audit weekly to test your unassisted skills."
+                    "Run the forge-audit skill with `weekly` to test your "
+                    "unassisted skills."
                 ),
                 overdue_days=days_overdue,
             )
@@ -71,7 +72,8 @@ def check_audit_reminders(session: Session) -> list[AuditReminder]:
                     audit_type="stress_test",
                     message=(
                         f"Monthly stress test is {days_overdue} days overdue. "
-                        "Run /forge-audit monthly for a timed challenge without AI."
+                        "Run the forge-audit skill with `monthly` for a timed "
+                        "challenge without AI."
                     ),
                     overdue_days=days_overdue,
                 )
@@ -86,7 +88,8 @@ def check_audit_reminders(session: Session) -> list[AuditReminder]:
                     audit_type="dependency",
                     message=(
                         f"Quarterly dependency audit is {days_overdue} days overdue. "
-                        "Run /forge-audit quarterly to review your AI usage patterns."
+                        "Run the forge-audit skill with `quarterly` to review "
+                        "your AI usage patterns."
                     ),
                     overdue_days=days_overdue,
                 )
@@ -156,5 +159,4 @@ def compute_dependency_report(state_manager: StateManager) -> DependencyReport:
         total_violations=total_violations,
         assessment=assessment,
     )
-
 

@@ -1,6 +1,6 @@
 ---
 name: forge-audit
-description: Run a Forge Protocol self-audit of the user's unassisted skills — weekly canary, monthly stress test, or quarterly dependency review. Use when the user runs /forge-audit (optionally weekly, monthly, or quarterly) or says "run my canary", "test my skills without AI", "am I getting too dependent on AI", or when a Forge audit reminder is overdue.
+description: Run a Forge Protocol self-audit — weekly canary, monthly stress test, or quarterly dependency review. Use when the user invokes forge-audit ($forge-audit in Codex, /forge-audit in Claude Code), asks to test their skills without AI, or when an audit reminder is overdue.
 ---
 
 # Forge Audit — Self-Assessment System
@@ -15,11 +15,11 @@ Start by checking what is actually due:
 <FORGE_CLI> state
 ```
 
-The `audit_reminders` array says which audits are overdue, each with a `type` (`canary`, `stress_test`, or `dependency`), a `message`, and `overdue_days`. If the user ran `/forge-audit` with no argument, lead with the overdue ones; if the array is empty, say all audits are current and ask which of the three they want.
+The `audit_reminders` array says which audits are overdue, each with a `type` (`canary`, `stress_test`, or `dependency`), a `message`, and `overdue_days`. If the user invoked the skill with no argument, lead with the overdue ones; if the array is empty, say all audits are current and ask which of the three they want.
 
 ## Audit Types
 
-### Weekly Canary (`/forge-audit weekly`)
+### Weekly Canary (`forge-audit weekly`)
 
 A timed challenge you complete **without AI assistance**:
 - A fixed set of writing, analysis, debugging, strategy, and communication prompts (stable IDs so you take the same one repeatedly)
@@ -28,14 +28,14 @@ A timed challenge you complete **without AI assistance**:
 - Scores are stored across weeks — you see trend, change vs. previous, mean of last 5, linear slope
 - Purpose: measure, not just remind. If your independence score drifts down, the canary catches it before you do.
 
-### Monthly Stress Test (`/forge-audit monthly`)
+### Monthly Stress Test (`forge-audit monthly`)
 
 A harder challenge requiring sustained unassisted work:
 - Complete a significant task without AI for 30-60 minutes
 - Compare output quality to your AI-assisted baseline
 - Purpose: verify you can still perform under pressure
 
-### Quarterly Dependency Audit (`/forge-audit quarterly`)
+### Quarterly Dependency Audit (`forge-audit quarterly`)
 
 Review your AI usage patterns across all sessions:
 - Mode ratios (are you living in Executor mode?)

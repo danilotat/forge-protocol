@@ -1,10 +1,10 @@
-"""Tests for the Claude Code hook policy in `forge_cc.handlers`.
+"""Tests for the Codex and Claude Code hook policy in `forge_cc.handlers`.
 
 Replaces the old `test_plugin.py`. Under Hermes the protocol exposed nine
-tools the orchestrator could choose to call; the Claude Code port runs the
+tools the orchestrator could choose to call; the host hooks run the
 same logic from hooks, unconditionally. Each handler is a plain
 `dict -> dict` function, so these tests drive them with payload dicts instead
-of spawning Claude Code.
+of spawning either host.
 
 Every test points `FORGE_STATE_DIR` at a tmp dir and disables the auditor, so
 nothing writes to `~/.forge-state/` and nothing spawns a `claude` subprocess.
@@ -109,7 +109,7 @@ def test_session_start_injects_mode_and_cli_path(isolated_env):
 def test_session_start_records_the_session_pointer(isolated_env):
     handlers.session_start({"session_id": "s-pointer", "cwd": str(isolated_env)})
 
-    # The `forge` CLI gets no session id from Claude Code, so it reads this
+    # The `forge` CLI gets no session id from the host, so it reads this
     # pointer back. Both the cwd-keyed entry and the _last fallback must work.
     assert paths.get_current_session(str(isolated_env)) == "s-pointer"
     assert paths.get_current_session() == "s-pointer"
