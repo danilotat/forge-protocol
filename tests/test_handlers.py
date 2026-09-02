@@ -606,7 +606,14 @@ def test_session_end_is_silent_in_executor_mode(isolated_env):
 # Recursion guard
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("handler", ALL_HANDLERS)
+@pytest.mark.parametrize(
+    "handler", [h for h in ALL_HANDLERS if h.id != "pre_tool_use"]
+)
+# `pre_tool_use` is intentionally absent from this list: the suppression guard
+# exists to stop the auditor's child re-entering hooks that CALL the auditor,
+# and the write-lock does not. Honouring the variable there let one stray
+# environment variable switch the write-lock off — see
+# tests/test_mode_guard.py::test_the_env_var_cannot_disable_the_write_lock.
 def test_every_handler_no_ops_inside_the_auditor_child(isolated_env, monkeypatch, handler):
     """`--safe-mode` already stops the child loading this plugin; belt and braces.
 

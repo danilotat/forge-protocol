@@ -153,6 +153,17 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
     if relaxing:
         consent = consume_mode_request()
         if consent != args.mode:
+            # --force exists for a human at a terminal. A model driving the
+            # Bash tool has no TTY, so this closes the escape chain
+            # "Bash(forge set-mode executor --force)" -> Write, which
+            # otherwise walked straight through the write-lock.
+            interactive = sys.stdin.isatty() and sys.stdout.isatty()
+            if args.force and not interactive:
+                return _fail(
+                    f"refusing to force out of {previous} mode: --force requires "
+                    "an interactive terminal, and this is not one. Ask the user "
+                    f"to run /{args.mode}-mode themselves."
+                )
             if not args.force:
                 return _fail(
                     f"refusing to leave {previous} mode: switching to "
@@ -425,7 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_set.add_argument(
         "--force",
         action="store_true",
-        help="leave a thinking mode without a user request (logged as a violation)",
+        help="leave a thinking mode without a user request; requires a TTY, logged as a violation",
     )
     p_set.set_defaults(func=cmd_set_mode)
 

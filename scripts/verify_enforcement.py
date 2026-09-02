@@ -31,6 +31,8 @@ FORGE = REPO / "bin" / "forge"
 
 _passed = 0
 _failed: list[str] = []
+SID = "verify-session"
+CWD = str(REPO)
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:
@@ -62,9 +64,13 @@ def hook(event_script: str, payload: dict, env: dict | None = None) -> dict:
 
 
 def set_mode(mode: str) -> dict:
-    """Switch modes for setup. --force because leaving a thinking mode now
-    requires a user request, and this script is the user."""
-    return forge("set-mode", mode, "--force")
+    """Switch modes the way a user does: the hook applies it from the prompt.
+
+    Not `--force`, which now requires a TTY, and not a bare `set-mode`, which
+    is refused when it would relax a thinking mode without user consent.
+    """
+    hook("user-prompt-submit.py", {"session_id": SID, "cwd": CWD, "prompt": f"/{mode}-mode"})
+    return forge("state")
 
 
 def forge(*args: str, env: dict | None = None) -> dict:
@@ -153,8 +159,10 @@ def main() -> int:
     for leftover in ("ANTHROPIC_API_KEY", "VERTEX_PROJECT", "VERTEX_REGION"):
         os.environ.pop(leftover, None)
 
-    sid = "verify-session"
-    cwd = str(REPO)
+    global SID, CWD
+    SID = "verify-session"
+    CWD = str(REPO)
+    sid, cwd = SID, CWD
     payload = {"session_id": sid, "cwd": cwd}
 
     print("\nno API key in the environment")

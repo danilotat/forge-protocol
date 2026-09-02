@@ -215,9 +215,20 @@ The Hermes original could only *ask* the model to stay in mode. Claude Code lets
 
 While Forge, Anvil, or Crucible is active, a `PreToolUse` hook returns a hard `deny` for every write-capable tool, with a reason that quotes the mode rule being violated and logs a violation to the session file. This is deterministic and harness-run: it does not depend on the model's goodwill. "Never rewrites" and "never fills the gaps" stop being requests.
 
-`Bash` cannot be denied outright — the slash-command skills need it to reach the `forge` CLI, which is how mode switching, status, and the canary work at all. So the hook inspects the command instead and denies the shell forms that write a file: output redirection to a real path, `tee`, `dd`, `truncate`, `install`, and in-place edits (`sed -i`, `perl -pi`). `>/dev/null` and read-only commands pass, so the CLI stays reachable.
+`Bash` cannot be denied outright — the audit and status skills reach the `forge` CLI through it — so the hook inspects the command instead and denies redirections (`>`, `>>`, `2>`, `&>`, `>|`), `tee`/`dd`/`truncate`/`install`/`cp`/`mv`/`ln`/`patch`/`rsync`, in-place edits (`sed -i`, `--in-place`, `perl -pi`), working-tree rewrites (`git checkout --`, `git restore`, `git apply`), and interpreters handed inline code (`python -c`, `node -e`, `perl -e`). It also denies any command that tries to change the mode. Read-only work — `grep`, `git log`, `pytest`, `ls`, `./bin/forge state` — still runs.
 
-That check is narrow on purpose and is **not** a sandbox. `python3 -c "open('f','w')..."` still gets through it. What catches that is the third layer: the independent output audit, which judges the response you actually produced — "I created the file for you" violates Forge's rules however the file got created. Deterministic denial for the ordinary paths, an LLM judge for the rest.
+**This is a denylist, and denylists leak.** A determined shell one-liner will get through: a compiled helper, an obscure utility, a here-doc into a program that writes. The third layer is what catches those — the independent output audit judges the response you actually produced, and "I created the file for you" violates Forge's rules however the file appeared. Deterministic denial for the paths a model actually reaches for, an LLM judge for the rest. Treat it as a strong guardrail, not a sandbox.
+
+Four things that used to open the lock and no longer do, found by auditing it rather than by testing:
+
+| Hole | Now |
+|---|---|
+| `Bash(forge set-mode executor --force)` then `Write` — three permitted calls, and the write landed | Mode-changing commands are denied at the tool boundary, and `--force` requires a TTY the model does not have |
+| `FORGE_AUDITOR_CHILD=1` anywhere in the environment switched the whole lock off | The write-lock no longer consults that variable; it guards auditor recursion only |
+| A missing or corrupt `modes/` directory failed **open** | Fails closed — the session's chosen mode is honoured even when its definition will not load |
+| `sed --in-place`, `&>`, `cp`, `mv`, `git checkout --`, `python -c` all passed | All denied |
+
+One that remains by design: any exception inside the hook exits 0 and allows the tool, because a crashed hook must not break your session. That is a deliberate trade, and `FORGE_HOOK_DEBUG=1` is how you find out it happened — it is how the `import json` bug in the background worker was caught.
 
 ### A mode the model can leave is not a mode
 

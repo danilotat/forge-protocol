@@ -70,6 +70,12 @@ compliance. Both enforcement paths must keep working:
 - **Auditor disabled** (`FORGE_AUDITOR_ENABLED=0`): `lib.auditor.audit_*` returns `None` and the hook injects the bare
   rules for the model to self-evaluate.
 
+**The write-lock fails closed.** `pre_tool_use` denies on the session's `current_mode` alone, so a modes/ directory
+that will not load does not unlock writes; it is deliberately NOT guarded by `_suppressed()` (that guard is for
+auditor recursion, and honouring `FORGE_AUDITOR_CHILD` there let one env var disable the lock); and it denies any
+Bash command matching `_switches_mode`, because `Bash(forge set-mode executor --force)` -> `Write` was a working
+three-call escape. `--force` additionally requires a TTY. Keep all four properties.
+
 The one deterministic exception is tool permission, which is plumbing rather than judgment: `PreToolUse` denies the
 write tools outright, and `handlers.bash_write_intent` string-matches shell write forms. Keep that narrow — it is a
 guardrail for the ordinary paths, with the output audit as the real backstop. Do not grow it into a shell parser.

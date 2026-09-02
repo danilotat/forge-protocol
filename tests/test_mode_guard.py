@@ -125,7 +125,10 @@ def test_lateral_move_between_thinking_modes_is_free(capsys):
     assert out["write_tools_blocked"] is True
 
 
-def test_force_escapes_but_is_logged_as_a_violation(capsys):
+def test_force_escapes_but_is_logged_as_a_violation(capsys, monkeypatch):
+    # --force now requires a terminal; simulate a human running it by hand.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
     _run(capsys, "set-mode", "forge")
     code, out = _run(capsys, "set-mode", "executor", "--force")
     assert code == 0
@@ -476,3 +479,102 @@ def test_the_hook_respects_allowed_to(tmp_path, monkeypatch, capsys):
                                  "prompt": "/anvil-mode"})
     _code, state = _run(capsys, "state", "--session-id", "hs3")
     assert state["current_mode"] == "anvil"
+
+
+# ---------------------------------------------------------------------------
+# Write-lock escape audit
+#
+# Asked "what would let the next Write through while forge is active?", the
+# answer was four things. Each one is pinned here.
+# ---------------------------------------------------------------------------
+
+def _deny(payload) -> bool:
+    from forge_cc import handlers
+
+    out = handlers.pre_tool_use(payload)
+    return out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+
+
+def _write(tmp_path, session="esc"):
+    return {"session_id": session, "cwd": str(tmp_path),
+            "tool_name": "Write", "tool_input": {"file_path": "/tmp/x"}}
+
+
+def _bash(tmp_path, command, session="esc"):
+    return {"session_id": session, "cwd": str(tmp_path),
+            "tool_name": "Bash", "tool_input": {"command": command}}
+
+
+def test_bash_cannot_switch_the_mode(capsys, tmp_path):
+    """The escape chain was: Bash(forge set-mode executor --force) -> Write.
+
+    Three tool calls, all permitted, and the write landed. Mode changes come
+    from the user's prompt via the hook, so nothing legitimate shells out.
+    """
+    _run(capsys, "set-mode", "forge", "--session-id", "esc")
+    assert _deny(_bash(tmp_path, "./bin/forge set-mode executor --force"))
+    assert _deny(_bash(tmp_path, "/abs/path/bin/forge set-mode executor"))
+    assert _deny(_bash(tmp_path, "cd /tmp && forge set-mode executor"))
+    # read-only CLI use stays available, or /forge-status breaks
+    assert not _deny(_bash(tmp_path, "./bin/forge state"))
+    assert not _deny(_bash(tmp_path, "./bin/forge doctor"))
+
+
+def test_force_requires_a_terminal(capsys, tmp_path, monkeypatch):
+    """--force is for a human. The model's Bash tool has no TTY."""
+    _run(capsys, "set-mode", "forge", "--session-id", "esc")
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    code, out = _run(capsys, "set-mode", "executor", "--session-id", "esc", "--force")
+    assert code == 1
+    assert "interactive terminal" in out["error"]
+
+    _code, state = _run(capsys, "state", "--session-id", "esc")
+    assert state["current_mode"] == "forge"
+
+
+def test_the_env_var_cannot_disable_the_write_lock(capsys, tmp_path, monkeypatch):
+    """`_suppressed()` guards the auditor's recursion, not the write-lock.
+
+    Honouring FORGE_AUDITOR_CHILD here let one stray environment variable
+    switch off the only hard guarantee the plugin makes.
+    """
+    _run(capsys, "set-mode", "forge", "--session-id", "esc")
+    monkeypatch.setenv("FORGE_AUDITOR_CHILD", "1")
+    assert _deny(_write(tmp_path))
+
+
+def test_an_unloadable_mode_fails_closed(capsys, tmp_path, monkeypatch):
+    """A broken modes/ directory must not be a way to unlock writes."""
+    _run(capsys, "set-mode", "forge", "--session-id", "esc")
+    monkeypatch.setenv("FORGE_MODES_DIR", str(tmp_path / "gone"))
+    assert _deny(_write(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed --in-place s/a/b/ f.py",   # only -i was caught before
+        "echo hi &> out.txt",           # &> was not treated as a redirect
+        "echo hi 2> out.txt",
+        "echo hi >| out.txt",           # zsh clobber
+        'python3 -c "open(\'f\',\'w\')"',
+        "node -e write",
+        "cp draft.md final.md",
+        "mv a b",
+        "patch -p1 < d.diff",
+        "git checkout -- .",
+        "git restore f",
+    ],
+)
+def test_shell_write_forms_that_used_to_slip_through(command):
+    assert bash_write_intent(command) is not None, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["grep -rn x .", "git log --oneline", "python3 -m pytest -q", "ls -la",
+     "echo ok >/dev/null", "./bin/forge state"],
+)
+def test_read_only_work_still_runs(command):
+    assert bash_write_intent(command) is None, command

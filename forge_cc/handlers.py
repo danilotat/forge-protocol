@@ -62,7 +62,16 @@ WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 #: Shell programs whose whole job is writing a file. Denying Bash outright in a
 #: thinking mode is not an option — the slash-command skills reach the `forge`
 #: CLI through it — so the write-lock inspects the command instead.
-_SHELL_WRITERS = frozenset({"tee", "dd", "truncate", "install"})
+_SHELL_WRITERS = frozenset({
+    "tee", "dd", "truncate", "install", "cp", "mv", "ln", "patch", "rsync",
+})
+
+#: Interpreters given inline code. We cannot know what the snippet does, and
+#: in a thinking mode "run some code I wrote for you" is the violation itself.
+_INLINE_CODE = {
+    "python": ("-c",), "python3": ("-c",), "node": ("-e", "--eval"),
+    "perl": ("-e",), "ruby": ("-e",), "php": ("-r",), "bash": ("-c",), "sh": ("-c",),
+}
 
 #: Redirection targets that write nothing the user cares about. The skills
 #: themselves use `>/dev/null`.
@@ -169,6 +178,20 @@ def requested_mode(prompt: str) -> str | None:
     return match.group(1) if match else None
 
 
+_SET_MODE_RE = re.compile(r"\bforge\b[^\n|;&]*\bset-mode\b")
+
+
+def _switches_mode(command: str) -> bool:
+    """True if a shell command tries to change the active mode.
+
+    Mode changes are applied by `UserPromptSubmit` from the user's own prompt,
+    so nothing legitimate needs this any more — and leaving it reachable meant
+    `Bash(forge set-mode executor --force)` then `Write` walked through the
+    write-lock in three tool calls.
+    """
+    return bool(_SET_MODE_RE.search(command or ""))
+
+
 def bash_write_intent(command: str) -> str | None:
     """Describe how a shell command writes a file, or None if it doesn't.
 
@@ -192,14 +215,15 @@ def bash_write_intent(command: str) -> str | None:
         tokens = command.split()
 
     for index, token in enumerate(tokens):
-        # Output redirection: `>`, `>>`, `1>`, `>file`, `2>&1` (not a write).
-        if token in (">", ">>", "1>", "1>>"):
+        # Output redirection in its many spellings: `>`, `>>`, `1>`, `2>`,
+        # `&>`, `>|` (zsh clobber). `2>&1` and `>&2` are fd dups, not writes.
+        if token in (">", ">>", "1>", "1>>", "2>", "2>>", "&>", "&>>", ">|"):
             target = tokens[index + 1] if index + 1 < len(tokens) else ""
             if target and target not in _SINK_TARGETS:
                 return f"shell redirection to {target}"
             continue
-        if len(token) > 1 and token[0] == ">" and not token.startswith(">&"):
-            target = token.lstrip(">")
+        if len(token) > 1 and token[0] in ">&" and ">" in token and not token.startswith(">&"):
+            target = token.lstrip(">&|")
             if target and target not in _SINK_TARGETS:
                 return f"shell redirection to {target}"
             continue
@@ -207,11 +231,26 @@ def bash_write_intent(command: str) -> str | None:
         base = token.rsplit("/", 1)[-1]
         if base in _SHELL_WRITERS:
             return f"`{base}` writes a file"
-        # In-place edit: sed -i, perl -i/-pi, ruby -i
+        # In-place edit: sed -i / --in-place, perl -i/-pi, ruby -i
         if base in ("sed", "perl", "ruby", "gawk", "awk"):
             rest = tokens[index + 1 : index + 4]
-            if any(a == "-i" or a.startswith("-i") or a.startswith("-pi") for a in rest):
-                return f"`{base} -i` edits a file in place"
+            if any(
+                a == "-i" or a.startswith("-i") or a.startswith("-pi")
+                or a.startswith("--in-place")
+                for a in rest
+            ):
+                return f"`{base}` edits a file in place"
+
+        # Inline code: unbounded, so treated as intent to write.
+        flags = _INLINE_CODE.get(base)
+        if flags and any(a in flags for a in tokens[index + 1 : index + 5]):
+            return f"`{base}` running inline code"
+
+        # `git checkout -- path` / `git restore` overwrite the working tree.
+        if base == "git" and any(
+            a in ("checkout", "restore", "apply", "stash") for a in tokens[index + 1 : index + 3]
+        ):
+            return "`git` rewriting the working tree"
 
     return None
 
@@ -551,10 +590,12 @@ def pre_tool_use(payload: dict[str, Any]) -> dict[str, Any]:
     write content the user should write", Anvil's "never produce a revised
     version", and Crucible's "never fill in the negative space" stop being
     instructions the model may rationalize around.
-    """
-    if _suppressed():
-        return {}
 
+    Deliberately NOT guarded by `_suppressed()`. That guard exists to stop the
+    auditor's own child process re-entering the hooks that call the auditor;
+    this hook never calls it, so honouring FORGE_AUDITOR_CHILD here would let
+    a single stray environment variable switch the write-lock off.
+    """
     tool_name = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input")
     tool_input = tool_input if isinstance(tool_input, dict) else {}
@@ -563,19 +604,30 @@ def pre_tool_use(payload: dict[str, Any]) -> dict[str, Any]:
     if tool_name in WRITE_TOOLS:
         what = tool_name
     elif tool_name == "Bash":
-        intent = bash_write_intent(str(tool_input.get("command", "")))
-        if intent:
-            what = f"Bash ({intent})"
+        command = str(tool_input.get("command", ""))
+        if _switches_mode(command):
+            what = "Bash (changing the active mode)"
+        else:
+            intent = bash_write_intent(command)
+            if intent:
+                what = f"Bash ({intent})"
 
     if not what:
         return {}
 
     sm, session, mode = _session_and_mode(payload)
-    if mode is None or session.current_mode not in THINKING_MODES:
+    if session.current_mode not in THINKING_MODES:
         return {}
 
-    forbidden = mode.behaviors.forbidden
-    rationale = _rule_lines(forbidden[:3]) if forbidden else "  - (see mode rules)"
+    # Fail CLOSED when the mode definition will not load. The user chose a
+    # thinking mode; a broken or missing modes/ directory must not be a way to
+    # unlock writes.
+    mode_name = mode.name if mode else session.current_mode
+    forbidden = mode.behaviors.forbidden if mode else []
+    rationale = (
+        _rule_lines(forbidden[:3]) if forbidden
+        else "  - (mode rules unavailable — refusing rather than guessing)"
+    )
 
     sm.log_violation(
         session.session_id,
@@ -586,7 +638,7 @@ def pre_tool_use(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     return hookio.deny_tool(
-        f"Forge Protocol: {what} is blocked in {mode.name}. This mode "
+        f"Forge Protocol: {what} is blocked in {mode_name}. This mode "
         "forbids producing the work for the user:\n"
         f"{rationale}\n"
         "Writing the file through a shell redirect instead of the Write tool is "
