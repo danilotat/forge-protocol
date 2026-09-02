@@ -378,3 +378,101 @@ def test_max_revisions_zero_disables_blocking(capsys, tmp_path, monkeypatch):
     _run(capsys, "set-mode", "forge", "--session-id", "cap1")
     payload = _forge_stop_payload(tmp_path, _turn(tmp_path))
     assert handlers.stop(payload) == {}
+
+
+# ---------------------------------------------------------------------------
+# Namespaced slash commands, and the hook applying the switch itself
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "prompt,expected",
+    [
+        # bare, as when the plugin is loaded with --plugin-dir
+        ("/executor-mode", "executor"),
+        # namespaced, as when it is installed — this form was silently
+        # unrecognised, so a user typing it was REFUSED their own mode switch
+        ("/forge-protocol:executor-mode", "executor"),
+        ("/forge-protocol:forge-mode", "forge"),
+        # the wrapper Claude Code actually puts on the prompt
+        ("<command-name>/forge-protocol:anvil-mode</command-name>", "anvil"),
+        ("<command-message>x</command-message>\n<command-name>/forge-protocol:crucible-mode</command-name>", "crucible"),
+        # prose must not count as consent
+        ("the executor-mode skill is nice", None),
+        ("use executor mode", None),
+        ("write hello to /tmp/x.txt", None),
+    ],
+)
+def test_requested_mode_handles_every_invocation_form(prompt, expected):
+    assert requested_mode(prompt) == expected
+
+
+def test_the_hook_applies_the_switch_itself(tmp_path, capsys):
+    """No Bash round-trip: the skill body should not need `forge set-mode`.
+
+    Doing it in the hook also makes the switch deterministic — the model
+    cannot forget it — and keeps a wall of CLI JSON out of the transcript.
+    """
+    from forge_cc import handlers
+
+    out = handlers.user_prompt_submit({
+        "session_id": "hs1", "cwd": str(tmp_path),
+        "prompt": "<command-name>/forge-protocol:forge-mode</command-name>",
+    })
+
+    _code, state = _run(capsys, "state", "--session-id", "hs1")
+    assert state["current_mode"] == "forge"
+
+    context = out["hookSpecificOutput"]["additionalContext"]
+    assert "already applied" in context
+    assert "do not run" in context
+
+
+def test_the_hook_honors_a_user_relaxation(tmp_path, capsys):
+    """The namespaced form must work for leaving a thinking mode too."""
+    from forge_cc import handlers
+
+    handlers.user_prompt_submit({"session_id": "hs2", "cwd": str(tmp_path),
+                                 "prompt": "/forge-mode"})
+    _code, state = _run(capsys, "state", "--session-id", "hs2")
+    assert state["current_mode"] == "forge"
+
+    handlers.user_prompt_submit({"session_id": "hs2", "cwd": str(tmp_path),
+                                 "prompt": "/forge-protocol:executor-mode"})
+    _code, state = _run(capsys, "state", "--session-id", "hs2")
+    assert state["current_mode"] == "executor"
+
+
+def test_the_hook_respects_allowed_to(tmp_path, monkeypatch, capsys):
+    modes = tmp_path / "modes"
+    modes.mkdir()
+    souls = tmp_path / "souls"
+    souls.mkdir()
+    # A non-empty allowed_to is the constraint; an empty one means
+    # "unconstrained", matching cmd_set_mode. So forge allows only anvil.
+    for mid, allowed in (("forge", ["anvil"]), ("anvil", ["forge"]), ("executor", ["forge"])):
+        (souls / f"{mid}.md").write_text("x")
+        (modes / f"{mid}.json").write_text(json.dumps({
+            "id": mid, "name": mid, "description": mid,
+            "system_prompt_file": f"souls/{mid}.md",
+            "behaviors": {"required": [], "forbidden": []},
+            "input_rules": [],
+            "metacognitive": {"checkpoint_interval": 0, "prompts": []},
+            "transitions": {"confirm_switch": mid == "forge", "allowed_to": allowed},
+        }))
+    monkeypatch.setenv("FORGE_MODES_DIR", str(modes))
+
+    from forge_cc import handlers
+
+    handlers.user_prompt_submit({"session_id": "hs3", "cwd": str(tmp_path),
+                                 "prompt": "/forge-mode"})
+    # forge permits only anvil, so the hook must refuse to move to executor
+    handlers.user_prompt_submit({"session_id": "hs3", "cwd": str(tmp_path),
+                                 "prompt": "/executor-mode"})
+    _code, state = _run(capsys, "state", "--session-id", "hs3")
+    assert state["current_mode"] == "forge"
+
+    # ...but the permitted transition goes through
+    handlers.user_prompt_submit({"session_id": "hs3", "cwd": str(tmp_path),
+                                 "prompt": "/anvil-mode"})
+    _code, state = _run(capsys, "state", "--session-id", "hs3")
+    assert state["current_mode"] == "anvil"

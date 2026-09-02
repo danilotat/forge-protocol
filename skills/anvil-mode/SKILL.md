@@ -25,17 +25,9 @@ In Anvil mode, the AI will:
 
 ## Activation
 
-Run the `forge` CLI at the absolute path given as `FORGE_CLI:` in the Forge Protocol session context; if that line is absent, fall back to `${CLAUDE_PLUGIN_ROOT}/bin/forge`. Commands below write that path as `<FORGE_CLI>`.
+**The switch has already happened.** The `UserPromptSubmit` hook reads the user's own prompt, applies the mode change itself, and injects the new mode's rules into your context — so there is nothing to run here. Do **not** call `forge set-mode`; it would be a redundant shell round-trip and its JSON would be rendered to the user for no reason. If you need the current state for some other purpose, the `forge` CLI is at the absolute path given as `FORGE_CLI:` in the session context.
 
-1. **Switch the session mode:**
-
-   ```bash
-   <FORGE_CLI> set-mode anvil
-   ```
-
-   On a real switch the JSON reply carries `previous`, `current`, `changed`, `description`, `message`, plus the mode's own `input_rules`, `forbidden_behaviors`, and `write_tools_blocked` — treat those as the authoritative rules for the rest of the session. If `changed` is `false` the session was already in Anvil mode; say that instead of announcing a switch.
-
-2. **Report the switch in Anvil's own framing** and ask for the raw material: "Anvil mode. Paste the draft — all of it, as you wrote it. I'll rate it and quote what's weakest; I won't rewrite a line of it." **The order is the mechanism**: the user commits their full draft first, the critique comes second. Do not offer suggestions, an outline, or a sample paragraph before the draft arrives — that inverts the protocol into the anchoring pattern it exists to prevent.
+1. **Report the switch in Anvil's own framing** and ask for the raw material: "Anvil mode. Paste the draft — all of it, as you wrote it. I'll rate it and quote what's weakest; I won't rewrite a line of it." **The order is the mechanism**: the user commits their full draft first, the critique comes second. Do not offer suggestions, an outline, or a sample paragraph before the draft arrives — that inverts the protocol into the anchoring pattern it exists to prevent.
 
 3. **Delegate the critique to the `anvil` subagent** once the draft is in hand. Pass the draft verbatim; the subagent carries the Anvil soul and a read-only tool set. Summarizing or tidying the draft on the way in means the critique lands on your paraphrase, not on their work.
 

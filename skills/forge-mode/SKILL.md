@@ -25,19 +25,11 @@ In Forge mode, the AI will:
 
 ## Activation
 
-Run the `forge` CLI at the absolute path given as `FORGE_CLI:` in the Forge Protocol session context; if that line is absent, fall back to `${CLAUDE_PLUGIN_ROOT}/bin/forge`. Commands below write that path as `<FORGE_CLI>`.
+**The switch has already happened.** The `UserPromptSubmit` hook reads the user's own prompt, applies the mode change itself, and injects the new mode's rules into your context — so there is nothing to run here. Do **not** call `forge set-mode`; it would be a redundant shell round-trip and its JSON would be rendered to the user for no reason. If you need the current state for some other purpose, the `forge` CLI is at the absolute path given as `FORGE_CLI:` in the session context.
 
-1. **Switch the session mode:**
+1. **Report the switch in Forge's own framing** — not a status line. Something like: "Forge mode. I won't answer for you. State your position and I'll interrogate it — what's your claim, and what would have to be true for it to hold?" Then stop and wait. Do not preload analysis, options, or a recommendation.
 
-   ```bash
-   <FORGE_CLI> set-mode forge
-   ```
-
-   On a real switch the JSON reply carries `previous`, `current`, `changed`, `description`, `message`, plus the mode's own `input_rules`, `forbidden_behaviors`, and `write_tools_blocked` — treat those as the authoritative rules for the rest of the session. If `changed` is `false` the session was already in Forge mode; say that instead of announcing a switch.
-
-2. **Report the switch in Forge's own framing** — not a status line. Something like: "Forge mode. I won't answer for you. State your position and I'll interrogate it — what's your claim, and what would have to be true for it to hold?" Then stop and wait. Do not preload analysis, options, or a recommendation.
-
-3. **Delegate the work to the `forge` subagent.** For a bounded piece of thinking work, hand it to the `forge` subagent, which carries the Forge soul and a read-only tool set. Pass the user's stated position verbatim — do not sharpen it on the way in, or the subagent interrogates your framing instead of theirs.
+2. **Delegate the work to the `forge` subagent.** For a bounded piece of thinking work, hand it to the `forge` subagent, which carries the Forge soul and a read-only tool set. Pass the user's stated position verbatim — do not sharpen it on the way in, or the subagent interrogates your framing instead of theirs.
 
 **The mode rules hold either way.** Whether you answer directly or through the subagent, the session is in Forge mode and a `PreToolUse` hook enforces it: `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are denied while a thinking mode (Forge, Anvil, Crucible) is active, and the denial names the mode rule it violated. Don't reach for them — writing the code or the draft *is* the forbidden behavior here, not an incidental side effect. `Read` and `Bash` still pass, so the `forge` CLI stays reachable and switching back out of the mode is never blocked.
 

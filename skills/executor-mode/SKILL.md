@@ -21,17 +21,9 @@ Executor mode is standard AI behavior — no friction, no questioning, no checkp
 
 ## Activation
 
-Run the `forge` CLI at the absolute path given as `FORGE_CLI:` in the Forge Protocol session context; if that line is absent, fall back to `${CLAUDE_PLUGIN_ROOT}/bin/forge`. Commands below write that path as `<FORGE_CLI>`.
+**The switch has already happened.** The `UserPromptSubmit` hook reads the user's own prompt, applies the mode change itself, and injects the new mode's rules into your context — so there is nothing to run here. Do **not** call `forge set-mode`; it would be a redundant shell round-trip and its JSON would be rendered to the user for no reason. If you need the current state for some other purpose, the `forge` CLI is at the absolute path given as `FORGE_CLI:` in the session context.
 
-1. **Switch the session mode:**
-
-   ```bash
-   <FORGE_CLI> set-mode executor
-   ```
-
-   The JSON reply carries `previous`, `current`, `changed`, `description`, and `message` (and `write_tools_blocked: false`, since this mode has no write-lock). If `changed` is `false` the session was already in Executor mode; say that instead of announcing a switch.
-
-2. **Report the switch in one line, no ceremony** — "Executor mode: full tool access, no friction. What do you need?" — and get on with the task. This is the one mode where the AI-first pattern is sanctioned, so don't manufacture questions or checkpoints.
+1. **Report the switch in one line, no ceremony** — "Executor mode: full tool access, no friction. What do you need?" — and get on with the task. This is the one mode where the AI-first pattern is sanctioned, so don't manufacture questions or checkpoints.
 
 3. **Delegate to the `executor` subagent** for a bounded mechanical task, or just do the work directly. The `executor` subagent has the default full tool set, and the `PreToolUse` write-lock that guards Forge, Anvil, and Crucible does not apply here — `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are all available.
 

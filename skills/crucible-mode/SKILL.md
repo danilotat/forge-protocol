@@ -25,17 +25,9 @@ In Crucible mode, the AI will:
 
 ## Activation
 
-Run the `forge` CLI at the absolute path given as `FORGE_CLI:` in the Forge Protocol session context; if that line is absent, fall back to `${CLAUDE_PLUGIN_ROOT}/bin/forge`. Commands below write that path as `<FORGE_CLI>`.
+**The switch has already happened.** The `UserPromptSubmit` hook reads the user's own prompt, applies the mode change itself, and injects the new mode's rules into your context — so there is nothing to run here. Do **not** call `forge set-mode`; it would be a redundant shell round-trip and its JSON would be rendered to the user for no reason. If you need the current state for some other purpose, the `forge` CLI is at the absolute path given as `FORGE_CLI:` in the session context.
 
-1. **Switch the session mode:**
-
-   ```bash
-   <FORGE_CLI> set-mode crucible
-   ```
-
-   On a real switch the JSON reply carries `previous`, `current`, `changed`, `description`, `message`, plus the mode's own `input_rules`, `forbidden_behaviors`, and `write_tools_blocked` — treat those as the authoritative rules for the rest of the session. If `changed` is `false` the session was already in Crucible mode; say that instead of announcing a switch.
-
-2. **Report the switch in Crucible's own framing** and demand the raw material: "Crucible mode. Bring me at least 3 of your own ideas, numbered. I'll make the best case for each and then try to break it — I won't add ideas of my own." If the user brings fewer than 3, ask for more; do not offer a third to fill the gap. If the ideas they bring all read as the safe, generic option, the epistemic-sclerosis guard applies: ask for one wild or contrarian idea *before* pressure-testing, rather than converging early on the set in front of you.
+1. **Report the switch in Crucible's own framing** and demand the raw material: "Crucible mode. Bring me at least 3 of your own ideas, numbered. I'll make the best case for each and then try to break it — I won't add ideas of my own." If the user brings fewer than 3, ask for more; do not offer a third to fill the gap. If the ideas they bring all read as the safe, generic option, the epistemic-sclerosis guard applies: ask for one wild or contrarian idea *before* pressure-testing, rather than converging early on the set in front of you.
 
 3. **Delegate the stress test to the `crucible` subagent** once 3+ ideas are on the table. Pass the ideas verbatim; the subagent carries the Crucible soul and a read-only tool set. Do not merge, rank, or improve the ideas on the way in — testing your cleaned-up version is not testing theirs.
 

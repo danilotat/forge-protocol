@@ -110,6 +110,21 @@ guardrail for the ordinary paths, with the output audit as the real backstop. Do
 - `PostToolUse` is the wrong event for output validation — it fires after tool calls, never after a response.
 - Executor mode gets zero per-turn work: no audit, no write-lock, no checkpoints. That is a feature, not an oversight.
 
+### Mode changes happen in the hook, not the skill
+
+`UserPromptSubmit` detects a mode command in the user's raw prompt
+(`handlers.requested_mode`) and applies the switch itself. Two reasons, both load-bearing:
+
+- The skill body no longer shells out to `forge set-mode`, so no `Bash(...)` call and no wall of CLI JSON is rendered
+  to the user for what is bookkeeping. Superpowers-style skills are pure prompt; ours should look the same.
+- The switch becomes deterministic — the model cannot forget it, botch it, or reorder it relative to the rules
+  injection.
+
+`requested_mode` must match **every** invocation form: bare (`/forge-mode`, when loaded via `--plugin-dir`),
+namespaced (`/forge-protocol:forge-mode`, once installed), and Claude Code's `<command-name>` wrapper. It matched
+only the bare form at first, which meant an installed user typing `/forge-protocol:executor-mode` was refused their
+own mode switch by the consent gate. A leading `/` or `:` is required so prose does not count as consent.
+
 ### Mode changes: relaxing requires the user
 
 This exists because a real model, denied `Write`, invoked `/executor-mode` itself and wrote the file legally. A mode

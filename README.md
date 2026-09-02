@@ -204,6 +204,7 @@ The Hermes original could only *ask* the model to stay in mode. Claude Code lets
 
 | Hook | What it does |
 |---|---|
+| `UserPromptSubmit` | Applies a mode change the user asked for, before anything else touches the turn |
 | `SessionStart` | Announces the active mode, injects the orchestrator soul and that mode's system prompt, surfaces overdue audit reminders, and records which Forge session this working directory is using |
 | `UserPromptSubmit` | Counts the turn, checks the mode's entry rules, delivers metacognitive checkpoints, and records mode changes **you** asked for |
 | `PreToolUse` | **Denies `Write`, `Edit`, `MultiEdit`, `NotebookEdit`** — and `Bash` commands that write a file — while a thinking mode is active |

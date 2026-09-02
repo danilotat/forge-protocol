@@ -21,6 +21,7 @@ tests drive them directly without spawning Claude Code.
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any
 
@@ -144,13 +145,12 @@ def _rule_lines(items: list[str]) -> str:
     return "\n".join(f"  - {item}" for item in items)
 
 
-#: Slash commands that ask for a mode, mapped to the mode they select.
-_MODE_COMMANDS = {
-    "/forge-mode": "forge",
-    "/anvil-mode": "anvil",
-    "/crucible-mode": "crucible",
-    "/executor-mode": "executor",
-}
+#: A mode command in the raw prompt, in any of the forms Claude Code uses:
+#: `/forge-mode` when the plugin is loaded bare, and
+#: `/forge-protocol:forge-mode` — plus a `<command-name>` wrapper — once it is
+#: installed under its plugin namespace. Requiring a leading `/` or `:` keeps
+#: prose ("the executor-mode skill is nice") from counting as consent.
+_MODE_COMMAND_RE = re.compile(r"[/:]\s*(?:[a-z0-9._-]+:)?(forge|anvil|crucible|executor)-mode\b")
 
 
 def requested_mode(prompt: str) -> str | None:
@@ -162,11 +162,8 @@ def requested_mode(prompt: str) -> str | None:
     """
     if not prompt:
         return None
-    lowered = prompt.lower()
-    for command, mode in _MODE_COMMANDS.items():
-        if command in lowered:
-            return mode
-    return None
+    match = _MODE_COMMAND_RE.search(prompt.lower())
+    return match.group(1) if match else None
 
 
 def bash_write_intent(command: str) -> str | None:
@@ -311,12 +308,30 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
 
     sm, session, mode = _session_and_mode(payload)
 
-    # Record mode changes the USER asked for, before anything else can act on
-    # the turn. `forge set-mode` needs this to let the session out of a
-    # thinking mode — see forge_cc.paths.set_mode_request.
+    # Apply mode changes the USER asked for, here, before anything else acts
+    # on the turn. Two reasons this belongs in the hook rather than in the
+    # skill: the switch becomes deterministic (the model cannot forget it or
+    # get it wrong), and the skill stops needing a Bash round-trip whose JSON
+    # output was rendered in full to the user.
     requested = requested_mode(payload.get("prompt") or "")
+    switched_to = ""
     if requested:
+        # Still recorded, so a `forge set-mode` from any other caller sees the
+        # user's consent — see forge_cc.paths.set_mode_request.
         set_mode_request(requested, payload.get("cwd"))
+
+        if requested != session.current_mode:
+            modes = load_modes()
+            current = modes.get(session.current_mode)
+            allowed = not (
+                current
+                and current.transitions.allowed_to
+                and requested not in current.transitions.allowed_to
+            )
+            if allowed and requested in modes:
+                session = sm.switch_mode(session.session_id, requested)
+                mode = modes[requested]
+                switched_to = requested
 
     # A new user turn gets a fresh revision budget for the output audit.
     reset_audit_blocks(payload.get("cwd"))
@@ -326,10 +341,28 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
     session.updated_at = time.time()
     sm._write_session(session)
 
-    if mode is None or session.current_mode not in THINKING_MODES:
-        return {}
-
     outputs: list[dict[str, Any]] = []
+
+    if switched_to:
+        target = load_modes().get(switched_to)
+        locked = switched_to in THINKING_MODES
+        outputs.append(
+            hookio.additional_context(
+                "UserPromptSubmit",
+                f"Forge Protocol — the user switched to **{target.name if target else switched_to}** "
+                f"(`{switched_to}`). The switch is already applied; do not run "
+                "`forge set-mode`."
+                + (
+                    f"\n\nWrite tools ({', '.join(sorted(WRITE_TOOLS))}) are now denied, "
+                    "and an independent auditor reviews your responses."
+                    if locked
+                    else "\n\nNo friction applies in this mode."
+                ),
+            )
+        )
+
+    if mode is None or session.current_mode not in THINKING_MODES:
+        return hookio.merge(*outputs)
 
     audit = _audit_input_if_due(payload, session, mode)
     if audit is not None and not audit.compliant and audit.violations:
