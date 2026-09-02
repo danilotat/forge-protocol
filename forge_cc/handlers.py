@@ -59,6 +59,10 @@ from lib.validator import get_input_rules, get_output_rules  # noqa: E402
 #: outright rather than merely request.
 WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 
+# Codex reports its native patch tool as ``apply_patch``. Its matcher accepts
+# the Claude-compatible ``Write`` alias, but the payload keeps the native name.
+WRITE_TOOL_ALIASES = WRITE_TOOLS | {"apply_patch"}
+
 #: Shell programs whose whole job is writing a file. Denying Bash outright in a
 #: thinking mode is not an option — the slash-command skills reach the `forge`
 #: CLI through it — so the write-lock inspects the command instead.
@@ -165,7 +169,7 @@ _COMMAND_TAG_RE = re.compile(
     r"<command-name>\s*/?(?:[a-z0-9._-]+:)?(forge|anvil|crucible|executor)-mode\b"
 )
 _LEADING_COMMAND_RE = re.compile(
-    r"^\s*/(?:[a-z0-9._-]+:)?(forge|anvil|crucible|executor)-mode\b"
+    r"^\s*[/\$](?:[a-z0-9._-]+:)?(forge|anvil|crucible|executor)-mode\b"
 )
 
 
@@ -618,7 +622,7 @@ def pre_tool_use(payload: dict[str, Any]) -> dict[str, Any]:
     tool_input = tool_input if isinstance(tool_input, dict) else {}
 
     what = ""
-    if tool_name in WRITE_TOOLS:
+    if tool_name in WRITE_TOOL_ALIASES:
         what = tool_name
     elif tool_name == "Bash":
         command = str(tool_input.get("command", ""))
@@ -700,7 +704,12 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
     # Anchored on the user's turn, not "newest assistant message": the hook
     # races the transcript write, and auditing the previous turn's response
     # blocks a reply nobody judged.
-    response = response_under_audit(transcript_path)
+    # Codex supplies the stable, already-extracted response directly. Claude
+    # Code currently supplies only its transcript path, so keep that parser as
+    # the compatibility fallback.
+    response = str(payload.get("last_assistant_message") or "").strip()
+    if not response:
+        response = response_under_audit(transcript_path)
     if not response:
         return {}
 
@@ -791,5 +800,6 @@ __all__ = [
     "load_modes",
     "resolve_session_id",
     "WRITE_TOOLS",
+    "WRITE_TOOL_ALIASES",
     "THINKING_MODES",
 ]

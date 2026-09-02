@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import sys
 
 import pytest
@@ -351,6 +352,19 @@ def test_write_tools_are_allowed_in_executor_mode(isolated_env, tool):
     assert handlers.pre_tool_use({"session_id": "s-allow", "tool_name": tool}) == {}
 
 
+def test_codex_apply_patch_is_denied_in_thinking_modes(isolated_env):
+    _session("s-codex-patch", "forge")
+
+    out = handlers.pre_tool_use({
+        "session_id": "s-codex-patch",
+        "tool_name": "apply_patch",
+        "tool_input": {"command": "*** Begin Patch"},
+    })
+
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "apply_patch" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
 @pytest.mark.parametrize("mode", THINKING_MODES + ["executor"])
 def test_read_is_never_blocked(isolated_env, mode):
     session_id = f"s-read-{mode}"
@@ -481,6 +495,21 @@ def test_stop_blocks_and_logs_when_the_audit_finds_violations(isolated_env, monk
     assert len(violations) == 2
     assert {v.violation_type for v in violations} == {"output"}
     assert violations[0].mode == "forge"
+
+
+def test_stop_prefers_codex_last_assistant_message(isolated_env, monkeypatch):
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
+    calls = _fake_output_audit(monkeypatch, _VIOLATION_AUDIT)
+    _session("s-stop-codex", "forge")
+
+    out = handlers.stop({
+        "session_id": "s-stop-codex",
+        "last_assistant_message": "Codex response",
+        "transcript_path": "/unstable/codex/transcript.jsonl",
+    })
+
+    assert out["decision"] == "block"
+    assert calls[0][0] == "Codex response"
 
 
 def test_stop_can_warn_instead_of_blocking(isolated_env, monkeypatch):
@@ -858,7 +887,7 @@ def test_stop_returns_immediately_and_spawns_a_worker(tmp_path, monkeypatch):
     monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("FORGE_OUTPUT_BLOCK", raising=False)
     monkeypatch.setenv("FORGE_AUDITOR_ENABLED", "1")
-    monkeypatch.setenv("FORGE_AUDITOR_CMD", "/bin/true")  # resolvable, never used
+    monkeypatch.setenv("FORGE_AUDITOR_CMD", shutil.which("true") or "true")
 
     spawned = {}
     monkeypatch.setattr(
