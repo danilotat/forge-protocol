@@ -185,3 +185,97 @@ def test_unbalanced_quotes_do_not_raise():
     # shlex would throw; the detector must degrade, not crash a hook.
     assert bash_write_intent('echo "unterminated') is None
     assert bash_write_intent('echo "unterminated > f.txt') is not None
+
+
+# ---------------------------------------------------------------------------
+# The gate is driven by modes/*.yaml, not a hardcoded mode list
+# ---------------------------------------------------------------------------
+
+def test_confirm_switch_is_what_gates_the_transition(capsys, tmp_path, monkeypatch):
+    """A custom mode that sets confirm_switch: false is free to leave.
+
+    `transitions` used to be parsed and never read. If this test fails because
+    the field went back to being decorative, the consent gate has silently
+    become a hardcoded mode list again.
+    """
+    modes = tmp_path / "modes"
+    modes.mkdir()
+    souls = tmp_path / "souls"
+    souls.mkdir()
+    (souls / "loose.md").write_text("A mode nobody needs permission to leave.")
+    (souls / "tight.md").write_text("A mode that must be confirmed on exit.")
+
+    def write_mode(mode_id: str, confirm: bool) -> None:
+        (modes / f"{mode_id}.json").write_text(
+            json.dumps({
+                "id": mode_id,
+                "name": f"{mode_id.title()} Mode",
+                "description": mode_id,
+                "system_prompt_file": f"souls/{mode_id}.md",
+                "behaviors": {"required": [], "forbidden": []},
+                "input_rules": [],
+                "metacognitive": {"checkpoint_interval": 0, "prompts": []},
+                "transitions": {"confirm_switch": confirm, "allowed_to": ["loose", "tight"]},
+            })
+        )
+
+    write_mode("loose", False)
+    write_mode("tight", True)
+    monkeypatch.setenv("FORGE_MODES_DIR", str(modes))
+
+    # tight (confirm_switch) -> loose (no confirm) is a relaxation: gated.
+    _run(capsys, "set-mode", "tight")
+    code, out = _run(capsys, "set-mode", "loose")
+    assert code == 1
+    assert "refusing to leave tight mode" in out["error"]
+
+    # loose -> tight tightens, so it needs nothing.
+    paths.set_mode_request("loose", str(tmp_path))
+    _run(capsys, "set-mode", "loose")
+    code, out = _run(capsys, "set-mode", "tight")
+    assert code == 0
+
+
+def test_allowed_to_restricts_the_target(capsys, tmp_path, monkeypatch):
+    modes = tmp_path / "modes"
+    modes.mkdir()
+    souls = tmp_path / "souls"
+    souls.mkdir()
+    for mode_id, allowed in (("island", []), ("elsewhere", ["island"])):
+        (souls / f"{mode_id}.md").write_text("x")
+        (modes / f"{mode_id}.json").write_text(
+            json.dumps({
+                "id": mode_id,
+                "name": mode_id,
+                "description": mode_id,
+                "system_prompt_file": f"souls/{mode_id}.md",
+                "behaviors": {"required": [], "forbidden": []},
+                "input_rules": [],
+                "metacognitive": {"checkpoint_interval": 0, "prompts": []},
+                # island declares no onward transitions at all
+                "transitions": {"confirm_switch": False, "allowed_to": allowed},
+            })
+        )
+    monkeypatch.setenv("FORGE_MODES_DIR", str(modes))
+
+    _run(capsys, "set-mode", "elsewhere")
+    code, out = _run(capsys, "set-mode", "island")
+    assert code == 0
+    # island's allowed_to is empty, so it does not constrain onward moves
+    code, out = _run(capsys, "set-mode", "elsewhere")
+    assert code == 0
+
+    # but elsewhere only allows island, so a third mode would be refused
+    (modes / "third.json").write_text(
+        json.dumps({
+            "id": "third", "name": "third", "description": "t",
+            "system_prompt_file": "souls/island.md",
+            "behaviors": {"required": [], "forbidden": []},
+            "input_rules": [],
+            "metacognitive": {"checkpoint_interval": 0, "prompts": []},
+            "transitions": {"confirm_switch": False, "allowed_to": []},
+        })
+    )
+    code, out = _run(capsys, "set-mode", "third")
+    assert code == 1
+    assert "does not allow switching to third" in out["error"]
