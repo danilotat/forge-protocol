@@ -141,3 +141,34 @@ def test_thinking_modes_forbid_disproportionate_responses():
     for mode_id in ("forge", "anvil", "crucible"):
         forbidden = " ".join(modes[mode_id].behaviors.forbidden).lower()
         assert "scale the intervention" in forbidden, f"{mode_id} lost its proportionality rule"
+
+
+def test_routing_is_exempt_from_the_oracular_ban():
+    """The orchestrator soul is *required* to name the mode that fits a task.
+
+    Forge's ban on authoritative recommendations must therefore be scoped to
+    the substance of the user's problem. Unscoped, the two instructions
+    contradict each other and every mode-mismatch notice gets blocked — the
+    model is told to route and punished for routing.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    forge = load_all_modes(root / "modes")["forge"]
+
+    oracular = [b for b in forge.behaviors.forbidden if "oracular" in b.lower()]
+    assert oracular, "the anti-oracular rule went missing"
+    assert "routing" in oracular[0].lower(), (
+        "the oracular ban must exempt mode routing, or souls/forge-orchestrator.md "
+        "commands a violation"
+    )
+
+    ordering = [b for b in forge.behaviors.required if b.startswith("Lead with questions")]
+    assert ordering, "the ordering rule went missing"
+    assert "mode announcement" in ordering[0] or "protocol" in ordering[0], (
+        "the ordering rule must let a mode announcement precede the questions"
+    )
+
+    # and the soul side must say the same thing, or generation and audit drift
+    soul = (root / "souls" / "forge-orchestrator.md").read_text()
+    assert "routing, not answering" in soul
