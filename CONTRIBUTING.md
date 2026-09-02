@@ -30,7 +30,7 @@ pytest
 ## Code Style
 - Python 3.11+ with type hints
 - Tests for all new functionality
-- Keep `lib/` free of Hermes dependencies (portable core)
+- Keep `lib/` free of host dependencies (portable core: it must not import `forge_cc/` or know about Claude Code)
 
 ## Pull Requests
 - One feature per PR
