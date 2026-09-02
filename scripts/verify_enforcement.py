@@ -255,6 +255,8 @@ def main() -> int:
     audit_env = {
         "FORGE_AUDITOR_ENABLED": "1",
         "FORGE_AUDITOR_CMD": str(fake_auditor(tmp, violations=True)),
+        # blocking is opt-in; the default path is checked separately below
+        "FORGE_OUTPUT_BLOCK": "1",
     }
     stop_payload = {**payload, "transcript_path": str(transcript), "stop_hook_active": False}
 
@@ -276,6 +278,26 @@ def main() -> int:
 
     out = hook("stop.py", stop_payload, env={**audit_env, "FORGE_AUDITOR_CHILD": "1"})
     check("recursion guard suppresses the hook", out == {}, f"got {out!r}")
+
+    print("\ndefault output path (one answer, correction carried forward)")
+    notify_env = {
+        "FORGE_AUDITOR_ENABLED": "1",
+        "FORGE_AUDITOR_CMD": str(fake_auditor(tmp, violations=True)),
+    }
+    out = hook("stop.py", stop_payload, env=notify_env)
+    check(
+        "default does not send the turn back",
+        "decision" not in out and "systemMessage" in out,
+        f"got {out!r}",
+    )
+    nxt = hook("user-prompt-submit.py", {**payload, "prompt": "carry on"}, env=notify_env)
+    carried = nxt.get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("the finding is delivered on the next turn", "flagged your PREVIOUS" in carried)
+    nxt2 = hook("user-prompt-submit.py", {**payload, "prompt": "again"}, env=notify_env)
+    check(
+        "and is not repeated every turn",
+        "flagged your PREVIOUS" not in nxt2.get("hookSpecificOutput", {}).get("additionalContext", ""),
+    )
 
     compliant_env = {
         "FORGE_AUDITOR_ENABLED": "1",

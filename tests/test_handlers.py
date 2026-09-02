@@ -421,6 +421,7 @@ _VIOLATION_AUDIT = AuditResult(
 
 
 def test_stop_is_a_no_op_when_stop_hook_active(isolated_env, monkeypatch):
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
     """The infinite-loop guard.
 
     A blocking Stop hook sends the agent back for another turn, which fires
@@ -459,6 +460,7 @@ def test_stop_is_a_no_op_in_executor_mode(isolated_env, monkeypatch):
 
 
 def test_stop_blocks_and_logs_when_the_audit_finds_violations(isolated_env, monkeypatch):
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
     _fake_output_audit(monkeypatch, _VIOLATION_AUDIT)
     _session("s-stop-block", "forge")
 
@@ -570,6 +572,7 @@ def test_stop_is_a_no_op_without_a_response(isolated_env, monkeypatch, transcrip
 
 
 def test_subagent_stop_shares_the_stop_policy(isolated_env, monkeypatch):
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
     _fake_output_audit(monkeypatch, _VIOLATION_AUDIT)
     _session("s-subagent", "crucible")
 
@@ -736,3 +739,101 @@ def test_trace_failure_never_breaks_the_hook(tmp_path, monkeypatch):
     blocker.write_text("x")
     monkeypatch.setenv("FORGE_STATE_DIR", str(blocker))
     assert hookio.run(handlers.session_start) == 0
+
+
+# ---------------------------------------------------------------------------
+# The default output path: one answer, correction carried forward
+#
+# Blocking on Stop fires after the response has rendered, so it cannot stop
+# the user reading a violation — it only appends a second copy of the answer.
+# The default therefore notifies and feeds the finding to the next turn.
+# ---------------------------------------------------------------------------
+
+def _violating_audit(monkeypatch, rule="Offer a single authoritative recommendation"):
+    from lib.auditor import AuditResult, RuleViolation
+
+    monkeypatch.setattr(
+        "lib.auditor.audit_output",
+        lambda *a, **k: AuditResult(
+            compliant=False,
+            auditor_model="fake",
+            violations=[RuleViolation(rule=rule, kind="forbidden",
+                                      quote="Here's what I'd suggest", reason="oracular")],
+        ),
+    )
+
+
+def _one_turn_transcript(tmp_path, text="Here's what I'd suggest."):
+    path = tmp_path / "carry.jsonl"
+    path.write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": "q"}}) + "\n"
+        + json.dumps({"type": "assistant", "message": {"role": "assistant",
+                      "content": [{"type": "text", "text": text}]}}) + "\n",
+        encoding="utf-8")
+    return path
+
+
+def test_default_does_not_block_so_the_answer_is_not_doubled(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("FORGE_OUTPUT_BLOCK", raising=False)
+    _violating_audit(monkeypatch)
+
+    from forge_cc.cli import main as cli_main
+    cli_main(["set-mode", "forge", "--session-id", "d1"])
+
+    out = handlers.stop({
+        "session_id": "d1", "cwd": str(tmp_path),
+        "transcript_path": str(_one_turn_transcript(tmp_path)),
+        "stop_hook_active": False,
+    })
+
+    assert "decision" not in out, "the default must not send the turn back"
+    assert "systemMessage" in out
+    assert "flagged this response" in out["systemMessage"]
+
+
+def test_the_finding_is_delivered_on_the_next_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("FORGE_OUTPUT_BLOCK", raising=False)
+    monkeypatch.setenv("FORGE_AUDITOR_ENABLED", "0")
+
+    from forge_cc.cli import main as cli_main
+    cli_main(["set-mode", "forge", "--session-id", "d2"])
+
+    _violating_audit(monkeypatch)
+    handlers.stop({
+        "session_id": "d2", "cwd": str(tmp_path),
+        "transcript_path": str(_one_turn_transcript(tmp_path)),
+        "stop_hook_active": False,
+    })
+
+    nxt = handlers.user_prompt_submit({"session_id": "d2", "cwd": str(tmp_path),
+                                       "prompt": "carry on"})
+    context = nxt["hookSpecificOutput"]["additionalContext"]
+    assert "flagged your PREVIOUS" in context
+    assert "authoritative recommendation" in context
+    # it must not invite an apology or a re-answer, which would double the reply
+    assert "re-answer" in context
+
+    # and it is consumed, not repeated every turn
+    later = handlers.user_prompt_submit({"session_id": "d2", "cwd": str(tmp_path),
+                                         "prompt": "again"})
+    assert "flagged your PREVIOUS" not in (
+        later.get("hookSpecificOutput", {}).get("additionalContext", "")
+    )
+
+
+def test_blocking_is_still_available_when_asked_for(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
+    _violating_audit(monkeypatch)
+
+    from forge_cc.cli import main as cli_main
+    cli_main(["set-mode", "forge", "--session-id", "d3"])
+
+    out = handlers.stop({
+        "session_id": "d3", "cwd": str(tmp_path),
+        "transcript_path": str(_one_turn_transcript(tmp_path)),
+        "stop_hook_active": False,
+    })
+    assert out.get("decision") == "block"

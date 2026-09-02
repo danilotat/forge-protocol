@@ -311,6 +311,9 @@ def _turn(tmp_path, text="a reply that violates the mode"):
 
 
 def _always_violates(monkeypatch):
+    """Blocking is opt-in now; the cap only governs that path."""
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
+
     from lib.auditor import AuditResult, RuleViolation
 
     monkeypatch.setattr(

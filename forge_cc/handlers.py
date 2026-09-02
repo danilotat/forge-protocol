@@ -32,9 +32,11 @@ from .paths import (
     get_current_session,
     audit_blocks,
     bump_audit_blocks,
+    consume_pending_audit,
     modes_dir,
     reset_audit_blocks,
     set_current_session,
+    set_pending_audit,
     set_mode_request,
     souls_dir,
 )
@@ -360,6 +362,18 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
             )
         )
 
+    pending = consume_pending_audit(payload.get("cwd"))
+    if pending:
+        outputs.append(
+            hookio.additional_context(
+                "UserPromptSubmit",
+                "Forge Protocol — the independent auditor flagged your PREVIOUS "
+                "response. Do not repeat these violations in this turn, and do "
+                "not apologise for them or re-answer the earlier question:\n\n"
+                f"{pending}",
+            )
+        )
+
     checkpoint = check_checkpoint(session, mode)
     if checkpoint.due:
         session.last_checkpoint_at = session.message_count
@@ -489,7 +503,13 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
     # revision after revision. We keep our own budget per user turn.
     if payload.get("stop_hook_active"):
         return {}
-    if audit_blocks(payload.get("cwd")) >= _max_revisions():
+
+    # The budget bounds re-entry, so it only applies to the blocking path —
+    # and it is checked before the audit, not after, so an exhausted turn does
+    # not spend ~9s judging a response it cannot act on. Notifications never
+    # re-enter the agent and are never capped.
+    blocking = _flag("FORGE_OUTPUT_BLOCK", False)
+    if blocking and audit_blocks(payload.get("cwd")) >= _max_revisions():
         return {}
 
     sm, session, mode = _session_and_mode(payload)
@@ -519,8 +539,6 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
     if audit.compliant or not audit.violations:
         return {}
 
-    bump_audit_blocks(payload.get("cwd"))
-
     for v in audit.violations:
         sm.log_violation(
             session.session_id,
@@ -538,8 +556,18 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
         "not see your reasoning, only your output, which is the point."
     )
 
-    if not _flag("FORGE_OUTPUT_BLOCK", True):
-        return hookio.notify(reason)
+    if not blocking:
+        # Carry the detail into the next turn: the user has already read the
+        # response, so an in-place rewrite buys nothing but a second copy.
+        set_pending_audit(reason, payload.get("cwd"))
+        count = len(audit.violations)
+        return hookio.notify(
+            f"Forge Protocol: the auditor flagged this response "
+            f"({count} finding{'s' if count != 1 else ''} against {mode.name}). "
+            "Details go to the next turn."
+        )
+
+    bump_audit_blocks(payload.get("cwd"))
     return hookio.block(reason)
 
 

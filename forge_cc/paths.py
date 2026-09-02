@@ -192,6 +192,26 @@ def audit_blocks(cwd: str | None = None) -> int:
     return 0
 
 
+def set_pending_audit(finding: str, cwd: str | None = None) -> None:
+    """Hold an audit finding for delivery on the user's next turn.
+
+    Blocking on Stop cannot un-render the response the auditor rejected, so
+    the correction is carried forward instead of being extracted by force.
+    """
+    _update_entry(cwd, pending_audit=finding, pending_audit_at=time.time())
+
+
+def consume_pending_audit(cwd: str | None = None) -> str | None:
+    data = _load_pointer()
+    for key in (_pointer_key(cwd), "_last"):
+        entry = data.get(key)
+        if isinstance(entry, dict) and entry.get("pending_audit"):
+            finding = str(entry["pending_audit"])
+            _update_entry(cwd, pending_audit=None, pending_audit_at=None)
+            return finding
+    return None
+
+
 def consume_mode_request(cwd: str | None = None) -> str | None:
     """Read and clear the pending user mode request."""
     pending = peek_mode_request(cwd)
