@@ -287,9 +287,13 @@ def main() -> int:
     out = hook("stop.py", stop_payload, env=notify_env)
     check(
         "default does not send the turn back",
-        "decision" not in out and "systemMessage" in out,
+        "decision" not in out,
         f"got {out!r}",
     )
+    # The audit is detached, so give the worker a moment before the next turn.
+    import time as _time
+
+    _time.sleep(2)
     nxt = hook("user-prompt-submit.py", {**payload, "prompt": "carry on"}, env=notify_env)
     carried = nxt.get("hookSpecificOutput", {}).get("additionalContext", "")
     check("the finding is delivered on the next turn", "flagged your PREVIOUS" in carried)

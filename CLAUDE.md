@@ -93,6 +93,15 @@ guardrail for the ordinary paths, with the output audit as the real backstop. Do
   to `$FORGE_STATE_DIR/audit/hooks.jsonl` (`hookio._trace`) for tailing while you drive Claude Code. It records the
   decision, not the content, and carries only an exception *type* name — same rule as the auditor's `error`. Tracing
   must never raise: a broken trace is not worth a failed hook.
+- **The audit runs detached by default** (`handlers._spawn_audit` -> `forge_cc/audit_worker.py`), because the verdict
+  is not needed until the next turn. The Stop hook returns in ~60ms instead of 4800-9300ms. `UserPromptSubmit`
+  collects the finding, waiting at most `FORGE_AUDIT_WAIT` for a worker still in flight. Deliver it **before** the
+  thinking-mode gate: the finding describes a previous thinking-mode response, so a switch to Executor must not
+  swallow it. `FORGE_AUDITOR_ASYNC=0` forces the synchronous path.
+- **Latency levers, measured — do not re-guess these.** `--effort low` roughly halves the call (sonnet ~4.8s ->
+  ~3.0s) with no verdict changes on the calibration cases. Haiku is *slower* than sonnet here (~7.4s), needing an
+  extra round-trip for the JSON schema — the input audit used to pin haiku "for speed" and was the slowest hook in
+  the plugin. Process startup is negligible (`time_to_request_ms` 160-780ms); it is all model time.
 - **A finding does not block by default.** `Stop` fires after the response renders, so blocking cannot prevent the
   user reading a violation — it only appends a second copy of the answer. So the default notifies in one line and
   carries the detail into the next `UserPromptSubmit` (`paths.set_pending_audit` / `consume_pending_audit`), which

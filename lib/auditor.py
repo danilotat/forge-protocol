@@ -27,6 +27,7 @@ Configuration via environment variables:
 
     FORGE_AUDITOR_ENABLED   "0"/"false"/"no"/"off" to disable (default: enabled)
     FORGE_AUDITOR_MODEL     CLI model alias or id (default: sonnet)
+    FORGE_AUDITOR_EFFORT    low | medium | high | xhigh | max (default: low)
     FORGE_AUDITOR_CMD       path to the claude binary (default: "claude")
     FORGE_AUDITOR_TIMEOUT   subprocess timeout in seconds (default: 60)
 
@@ -49,6 +50,13 @@ if TYPE_CHECKING:
 DEFAULT_MODEL = "sonnet"
 DEFAULT_CMD = "claude"
 DEFAULT_TIMEOUT = 60
+
+#: Compliance judging is classification, not open-ended reasoning, so it does
+#: not need deep thinking — and effort is the single biggest latency lever
+#: available. Measured on this workload: sonnet at default effort ~4.8s,
+#: at low effort ~3.0s. (Haiku is *slower* than sonnet here, not faster: it
+#: needs an extra round-trip to satisfy the output schema.)
+DEFAULT_EFFORT = "low"
 
 #: A runner takes (system_prompt, user_prompt, json_schema) and returns the
 #: parsed JSON object the model produced. It raises on any failure; callers
@@ -286,6 +294,10 @@ def cli_path() -> str:
     return os.environ.get("FORGE_AUDITOR_CMD") or DEFAULT_CMD
 
 
+def effort() -> str:
+    return os.environ.get("FORGE_AUDITOR_EFFORT") or DEFAULT_EFFORT
+
+
 def timeout_seconds() -> int:
     raw = os.environ.get("FORGE_AUDITOR_TIMEOUT")
     if not raw:
@@ -320,6 +332,7 @@ def build_argv(system: str, schema: dict, user: str) -> list[str]:
         "--system-prompt", system,
         "--json-schema", json.dumps(schema),
         "--output-format", "json",
+        "--effort", effort(),
         "--tools", "",
         "--safe-mode",
         "--no-session-persistence",

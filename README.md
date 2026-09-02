@@ -246,6 +246,16 @@ When a thinking mode's turn ends, the `Stop` hook pulls the last assistant messa
 
 Every hook is wrapped so that an unexpected exception exits 0 with no output: a crashed hook would be worse than a skipped one, so Claude Code proceeds exactly as if the plugin were not installed. `FORGE_HOOK_DEBUG=1` prints the traceback instead of swallowing it.
 
+### The audit does not make you wait
+
+Measured cost of one audit: ~3-9s. Three things keep that off your critical path.
+
+- **It runs detached.** In the default path the verdict is not needed until your next turn, so the `Stop` hook spawns a background worker and returns — **56-68ms**, against 4800-9300ms when it waited. The finding lands on your next prompt; if the worker is still running, that prompt waits at most `FORGE_AUDIT_WAIT` seconds for it, and otherwise picks it up a turn later.
+- **`--effort low`.** Judging compliance is classification, not open-ended reasoning. Measured on this workload: sonnet at default effort ~4.8s, at low effort ~3.0s, with no change in verdicts across the calibration cases.
+- **Sonnet, not haiku.** This one was counter-intuitive: haiku is *slower* here (~7.4s vs ~4.8s) because it needs an extra round-trip to satisfy the output JSON schema. The input audit used to force haiku "because the check is cheap"; that made it the slowest hook in the plugin.
+
+Blocking mode (`FORGE_OUTPUT_BLOCK=1`) has to wait — the verdict gates the turn — so there you pay the ~3-5s.
+
 ### Why a violation does not rewrite the answer in place
 
 A `Stop` hook fires *after* the response has been rendered. So blocking cannot stop you reading a violating answer — by the time the auditor has an opinion, the text is already on your screen. All blocking adds is a **second copy** of the answer, plus the ~7-9s spent judging the first.
@@ -268,6 +278,9 @@ Everything is an environment variable; the plugin manifest has no field for decl
 |---|---|---|
 | `FORGE_AUDITOR_ENABLED` | **enabled** | Set to `0`/`false`/`no`/`off` to turn the independent auditor off and fall back to model self-evaluation |
 | `FORGE_AUDITOR_MODEL` | `sonnet` | Model for the output audit and canary scoring — a CLI alias or a full model id |
+| `FORGE_AUDITOR_EFFORT` | `low` | Thinking effort for the audit. Compliance judging is classification, and `low` roughly halves latency |
+| `FORGE_AUDITOR_ASYNC` | on | Set to `0` to audit synchronously in the Stop hook instead of in a detached worker |
+| `FORGE_AUDIT_WAIT` | `2.0` | Seconds the next turn waits for a still-running background audit |
 | `FORGE_AUDITOR_CMD` | `claude` | Path to the `claude` binary the auditor shells out to |
 | `FORGE_AUDITOR_TIMEOUT` | `60` | Auditor subprocess timeout, in seconds |
 | `FORGE_INPUT_BLOCK` | off | Set to `1` to make a failed entry-rule check block the prompt instead of annotating it |

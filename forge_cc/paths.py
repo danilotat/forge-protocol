@@ -201,6 +201,27 @@ def set_pending_audit(finding: str, cwd: str | None = None) -> None:
     _update_entry(cwd, pending_audit=finding, pending_audit_at=time.time())
 
 
+def set_audit_inflight(cwd: str | None = None) -> None:
+    """Note that a background audit is running for this working directory."""
+    _update_entry(cwd, audit_inflight=time.time())
+
+
+def clear_audit_inflight(cwd: str | None = None) -> None:
+    _update_entry(cwd, audit_inflight=None)
+
+
+def audit_inflight_since(cwd: str | None = None) -> float | None:
+    data = _load_pointer()
+    for key in (_pointer_key(cwd), "_last"):
+        entry = data.get(key)
+        if isinstance(entry, dict) and entry.get("audit_inflight"):
+            try:
+                return float(entry["audit_inflight"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def consume_pending_audit(cwd: str | None = None) -> str | None:
     data = _load_pointer()
     for key in (_pointer_key(cwd), "_last"):

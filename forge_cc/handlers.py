@@ -20,6 +20,7 @@ tests drive them directly without spawning Claude Code.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -32,10 +33,12 @@ from .paths import (
     ensure_importable,
     get_current_session,
     audit_blocks,
+    audit_inflight_since,
     bump_audit_blocks,
     consume_pending_audit,
     modes_dir,
     reset_audit_blocks,
+    set_audit_inflight,
     set_current_session,
     set_pending_audit,
     set_mode_request,
@@ -213,6 +216,40 @@ def bash_write_intent(command: str) -> str | None:
     return None
 
 
+def _spawn_audit(mode_id: str, response: str, user_message: str, cwd: str | None) -> None:
+    """Start the audit in a detached process and return immediately.
+
+    start_new_session detaches it from the hook's process group, so it
+    survives the hook exiting. Failures are swallowed: an audit that never
+    runs must look exactly like no audit at all.
+    """
+    import subprocess
+    import sys
+
+    payload = json.dumps({
+        "mode": mode_id,
+        "response": response,
+        "user_message": user_message,
+        "cwd": cwd or os.getcwd(),
+    })
+    try:
+        set_audit_inflight(cwd)
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "forge_cc.audit_worker"],
+            cwd=str(PLUGIN_ROOT),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        proc.stdin.write(payload.encode("utf-8"))
+        proc.stdin.close()
+    except Exception:  # noqa: BLE001
+        from .paths import clear_audit_inflight
+
+        clear_audit_inflight(cwd)
+
+
 def _read_soul(name: str) -> str:
     """Read a soul file by name, tolerating its absence."""
     path = souls_dir() / name
@@ -361,6 +398,21 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
             )
         )
 
+    # Deliver any background finding BEFORE the mode gate. The finding is
+    # about a response the previous (thinking) mode produced, so switching to
+    # Executor must not swallow it.
+    pending = _await_pending_audit(payload.get("cwd"))
+    if pending:
+        outputs.append(
+            hookio.additional_context(
+                "UserPromptSubmit",
+                "Forge Protocol — the independent auditor flagged your PREVIOUS "
+                "response. Do not repeat these violations in this turn, and do "
+                "not apologise for them or re-answer the earlier question:\n\n"
+                f"{pending}",
+            )
+        )
+
     if mode is None or session.current_mode not in THINKING_MODES:
         return hookio.merge(*outputs)
 
@@ -395,18 +447,6 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
             )
         )
 
-    pending = consume_pending_audit(payload.get("cwd"))
-    if pending:
-        outputs.append(
-            hookio.additional_context(
-                "UserPromptSubmit",
-                "Forge Protocol — the independent auditor flagged your PREVIOUS "
-                "response. Do not repeat these violations in this turn, and do "
-                "not apologise for them or re-answer the earlier question:\n\n"
-                f"{pending}",
-            )
-        )
-
     checkpoint = check_checkpoint(session, mode)
     if checkpoint.due:
         session.last_checkpoint_at = session.message_count
@@ -422,6 +462,39 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     return hookio.merge(*outputs)
+
+
+def _await_pending_audit(cwd: str | None) -> str | None:
+    """Collect a background finding, waiting briefly if one is still running.
+
+    Users normally spend longer typing than the audit takes, so this usually
+    returns immediately. The wait is capped so a slow or dead worker can never
+    stall a turn; a finding that misses its window simply arrives on the next.
+    """
+    import time as _time
+
+    pending = consume_pending_audit(cwd)
+    if pending:
+        return pending
+
+    started = audit_inflight_since(cwd)
+    if started is None:
+        return None
+
+    try:
+        budget = float(os.environ.get("FORGE_AUDIT_WAIT") or 2.0)
+    except ValueError:
+        budget = 2.0
+
+    deadline = _time.monotonic() + max(0.0, budget)
+    while _time.monotonic() < deadline:
+        _time.sleep(0.05)
+        pending = consume_pending_audit(cwd)
+        if pending:
+            return pending
+        if audit_inflight_since(cwd) is None:
+            return None  # worker finished and found nothing
+    return None
 
 
 def _audit_input_if_due(
@@ -449,19 +522,22 @@ def _audit_input_if_due(
     if not prompt.strip():
         return None
 
-    # Input rules are a cheap yes/no judgment; the strict model is reserved
-    # for the output audit, where rubber-stamping is the real risk.
+    # This used to force haiku "because the check is cheap". Measured on this
+    # workload haiku is *slower* than sonnet — it needs an extra round-trip to
+    # satisfy the JSON schema — so the override is gone. FORGE_INPUT_AUDITOR_MODEL
+    # still overrides if someone wants a different model here.
+    override = os.environ.get("FORGE_INPUT_AUDITOR_MODEL")
     previous = os.environ.get("FORGE_AUDITOR_MODEL")
-    os.environ["FORGE_AUDITOR_MODEL"] = os.environ.get(
-        "FORGE_INPUT_AUDITOR_MODEL", "haiku"
-    )
+    if override:
+        os.environ["FORGE_AUDITOR_MODEL"] = override
     try:
         return auditor.audit_input(prompt, get_input_rules(mode))
     finally:
-        if previous is None:
-            os.environ.pop("FORGE_AUDITOR_MODEL", None)
-        else:
-            os.environ["FORGE_AUDITOR_MODEL"] = previous
+        if override:
+            if previous is None:
+                os.environ.pop("FORGE_AUDITOR_MODEL", None)
+            else:
+                os.environ["FORGE_AUDITOR_MODEL"] = previous
 
 
 # ---------------------------------------------------------------------------
@@ -557,6 +633,12 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
     # blocks a reply nobody judged.
     response = response_under_audit(transcript_path)
     if not response:
+        return {}
+
+    if not blocking and _flag("FORGE_AUDITOR_ASYNC", True) and auditor.is_available():
+        # The verdict is not needed until the next turn, so do not make the
+        # user wait ~4s for it. Detach and return now.
+        _spawn_audit(mode.id, response, last_user_text(transcript_path), payload.get("cwd"))
         return {}
 
     audit = auditor.audit_output(

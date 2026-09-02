@@ -837,3 +837,92 @@ def test_blocking_is_still_available_when_asked_for(tmp_path, monkeypatch):
         "stop_hook_active": False,
     })
     assert out.get("decision") == "block"
+
+
+# ---------------------------------------------------------------------------
+# The background audit
+#
+# In the non-blocking path the verdict is not needed until the next turn, so
+# making the Stop hook wait ~4-9s for it is pure latency. It is spawned
+# detached instead; measured: 56-68ms for the hook vs 4800-9300ms before.
+# ---------------------------------------------------------------------------
+
+def test_stop_returns_immediately_and_spawns_a_worker(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("FORGE_OUTPUT_BLOCK", raising=False)
+    monkeypatch.setenv("FORGE_AUDITOR_ENABLED", "1")
+    monkeypatch.setenv("FORGE_AUDITOR_CMD", "/bin/true")  # resolvable, never used
+
+    spawned = {}
+    monkeypatch.setattr(
+        handlers, "_spawn_audit",
+        lambda mode, resp, user, cwd: spawned.update(mode=mode, resp=resp, cwd=cwd),
+    )
+
+    def must_not_run(*_a, **_k):
+        raise AssertionError("the default path must not audit synchronously")
+
+    monkeypatch.setattr("lib.auditor.audit_output", must_not_run)
+
+    from forge_cc.cli import main as cli_main
+    cli_main(["set-mode", "forge", "--session-id", "as1"])
+
+    out = handlers.stop({
+        "session_id": "as1", "cwd": str(tmp_path),
+        "transcript_path": str(_one_turn_transcript(tmp_path)),
+        "stop_hook_active": False,
+    })
+
+    assert out == {}, "nothing to say: the verdict comes later"
+    assert spawned["mode"] == "forge"
+    assert "suggest" in spawned["resp"]
+
+
+def test_blocking_path_still_audits_synchronously(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
+    _violating_audit(monkeypatch)
+    monkeypatch.setattr(
+        handlers, "_spawn_audit",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not detach when blocking")),
+    )
+
+    from forge_cc.cli import main as cli_main
+    cli_main(["set-mode", "forge", "--session-id", "as2"])
+
+    out = handlers.stop({
+        "session_id": "as2", "cwd": str(tmp_path),
+        "transcript_path": str(_one_turn_transcript(tmp_path)),
+        "stop_hook_active": False,
+    })
+    assert out.get("decision") == "block"
+
+
+def test_a_background_finding_survives_a_switch_to_executor(tmp_path, monkeypatch):
+    """Regression: the finding was consumed after the thinking-mode gate, so
+    switching to Executor on the next turn silently swallowed it."""
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("FORGE_AUDITOR_ENABLED", "0")
+
+    from forge_cc import paths
+    from forge_cc.cli import main as cli_main
+
+    cli_main(["set-mode", "forge", "--session-id", "as3"])
+    paths.set_pending_audit("Forge Protocol — an independent auditor found ...", str(tmp_path))
+
+    out = handlers.user_prompt_submit({
+        "session_id": "as3", "cwd": str(tmp_path), "prompt": "/executor-mode",
+    })
+    context = out["hookSpecificOutput"]["additionalContext"]
+    assert "flagged your PREVIOUS" in context
+    assert "switched to" in context  # both messages ride along
+
+
+def test_awaiting_a_finding_gives_up_rather_than_stalling(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("FORGE_AUDIT_WAIT", "0")
+
+    from forge_cc import paths
+
+    paths.set_audit_inflight(str(tmp_path))  # a worker that never finishes
+    assert handlers._await_pending_audit(str(tmp_path)) is None
