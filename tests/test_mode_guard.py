@@ -279,3 +279,99 @@ def test_allowed_to_restricts_the_target(capsys, tmp_path, monkeypatch):
     code, out = _run(capsys, "set-mode", "third")
     assert code == 1
     assert "does not allow switching to third" in out["error"]
+
+
+# ---------------------------------------------------------------------------
+# The revision cap
+#
+# `stop_hook_active` is necessary but not sufficient: measured against Claude
+# Code 2.1.258, a second block inside the same turn still arrives with the
+# flag false. Without our own budget the auditor can demand revision after
+# revision at ~7s each, and the user watches the same answer get rewritten.
+# ---------------------------------------------------------------------------
+
+def _forge_stop_payload(tmp_path, transcript):
+    return {
+        "session_id": "cap1",
+        "cwd": str(tmp_path),
+        "transcript_path": str(transcript),
+        "stop_hook_active": False,
+    }
+
+
+def _turn(tmp_path, text="a reply that violates the mode"):
+    path = tmp_path / "t.jsonl"
+    path.write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": "a prompt"}}) + "\n"
+        + json.dumps({"type": "assistant", "message": {"role": "assistant",
+                      "content": [{"type": "text", "text": text}]}}) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _always_violates(monkeypatch):
+    from lib.auditor import AuditResult, RuleViolation
+
+    monkeypatch.setattr(
+        "lib.auditor.audit_output",
+        lambda *a, **k: AuditResult(
+            compliant=False,
+            violations=[RuleViolation(rule="lead with questions", kind="required_missing",
+                                      reason="verdict first")],
+            auditor_model="fake",
+        ),
+    )
+
+
+def test_second_block_in_one_turn_is_refused(capsys, tmp_path, monkeypatch):
+    from forge_cc import handlers
+
+    _always_violates(monkeypatch)
+    _run(capsys, "set-mode", "forge", "--session-id", "cap1")
+    transcript = _turn(tmp_path)
+    payload = _forge_stop_payload(tmp_path, transcript)
+
+    first = handlers.stop(payload)
+    assert first.get("decision") == "block", "the first violation must block"
+
+    second = handlers.stop(payload)
+    assert second == {}, "a second block in the same turn must be refused"
+
+
+def test_a_new_user_turn_restores_the_budget(capsys, tmp_path, monkeypatch):
+    from forge_cc import handlers
+
+    _always_violates(monkeypatch)
+    _run(capsys, "set-mode", "forge", "--session-id", "cap1")
+    transcript = _turn(tmp_path)
+    payload = _forge_stop_payload(tmp_path, transcript)
+
+    assert handlers.stop(payload).get("decision") == "block"
+    assert handlers.stop(payload) == {}
+
+    handlers.user_prompt_submit({"session_id": "cap1", "cwd": str(tmp_path), "prompt": "next"})
+    assert handlers.stop(payload).get("decision") == "block", "budget should reset per turn"
+
+
+def test_max_revisions_is_configurable(capsys, tmp_path, monkeypatch):
+    from forge_cc import handlers
+
+    _always_violates(monkeypatch)
+    monkeypatch.setenv("FORGE_MAX_REVISIONS", "2")
+    _run(capsys, "set-mode", "forge", "--session-id", "cap1")
+    payload = _forge_stop_payload(tmp_path, _turn(tmp_path))
+
+    assert handlers.stop(payload).get("decision") == "block"
+    assert handlers.stop(payload).get("decision") == "block"
+    assert handlers.stop(payload) == {}
+
+
+def test_max_revisions_zero_disables_blocking(capsys, tmp_path, monkeypatch):
+    from forge_cc import handlers
+
+    _always_violates(monkeypatch)
+    monkeypatch.setenv("FORGE_MAX_REVISIONS", "0")
+    _run(capsys, "set-mode", "forge", "--session-id", "cap1")
+    payload = _forge_stop_payload(tmp_path, _turn(tmp_path))
+    assert handlers.stop(payload) == {}

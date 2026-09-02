@@ -161,6 +161,37 @@ def peek_mode_request(cwd: str | None = None) -> str | None:
     return None
 
 
+def reset_audit_blocks(cwd: str | None = None) -> None:
+    """Start a fresh revision budget. Called when the user takes a turn."""
+    _update_entry(cwd, audit_blocks=0)
+
+
+def bump_audit_blocks(cwd: str | None = None) -> int:
+    """Count one audit block against this turn's budget, return the new total."""
+    data = _load_pointer()
+    entry = data.get(_pointer_key(cwd))
+    current = 0
+    if isinstance(entry, dict):
+        try:
+            current = int(entry.get("audit_blocks") or 0)
+        except (TypeError, ValueError):
+            current = 0
+    _update_entry(cwd, audit_blocks=current + 1)
+    return current + 1
+
+
+def audit_blocks(cwd: str | None = None) -> int:
+    data = _load_pointer()
+    for key in (_pointer_key(cwd), "_last"):
+        entry = data.get(key)
+        if isinstance(entry, dict) and entry.get("audit_blocks") is not None:
+            try:
+                return int(entry["audit_blocks"])
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
 def consume_mode_request(cwd: str | None = None) -> str | None:
     """Read and clear the pending user mode request."""
     pending = peek_mode_request(cwd)

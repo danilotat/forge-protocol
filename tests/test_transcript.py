@@ -197,3 +197,126 @@ def test_unexpected_content_types_return_empty(tmp_path):
         {"type": "assistant", "message": {"role": "assistant", "content": [None, 5, "str"]}},
     ])
     assert last_assistant_text(path) == ""
+
+
+# ---------------------------------------------------------------------------
+# Anchoring the audit on the user's turn
+#
+# Regression tests for a real misfire: the Stop hook raced the transcript
+# write, read the newest assistant text on disk — which belonged to the
+# PREVIOUS turn — and blocked a response nobody had judged, quoting a
+# mode-switch banner from two turns earlier.
+# ---------------------------------------------------------------------------
+
+def _jsonl(path, entries):
+    path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+
+
+def _u(text):
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def _a(text):
+    return {
+        "type": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+    }
+
+
+def test_returns_nothing_when_the_transcript_is_behind(tmp_path):
+    """The exact race. Auditing nothing beats auditing the wrong turn."""
+    from forge_cc.transcript import assistant_text_after_last_user
+
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [
+        _a("Forge mode. I won't write for you here."),  # previous turn
+        _u("I was testing whether the lock holds"),          # new prompt
+        # the new response has not been flushed yet
+    ])
+    assert assistant_text_after_last_user(path) == ""
+
+
+def test_returns_only_text_after_the_last_user_message(tmp_path):
+    from forge_cc.transcript import assistant_text_after_last_user
+
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [
+        _a("stale banner from the previous turn"),
+        _u("the new prompt"),
+        _a("the reply that should be audited"),
+    ])
+    got = assistant_text_after_last_user(path)
+    assert got == "the reply that should be audited"
+    assert "stale" not in got
+
+
+def test_joins_multiple_assistant_entries_in_one_turn(tmp_path):
+    """A turn split across entries must be audited whole, in order."""
+    from forge_cc.transcript import assistant_text_after_last_user
+
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [
+        _u("prompt"),
+        _a("first part"),
+        {"type": "assistant", "message": {"role": "assistant",
+                                          "content": [{"type": "tool_use", "id": "x"}]}},
+        _a("second part"),
+    ])
+    assert assistant_text_after_last_user(path) == "first part\n\nsecond part"
+
+
+def test_tool_results_do_not_count_as_the_user_anchor(tmp_path):
+    """tool_result entries carry role user; they must not reset the anchor."""
+    from forge_cc.transcript import assistant_text_after_last_user
+
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [
+        _u("the real prompt"),
+        _a("before the tool call"),
+        {"type": "user", "message": {"role": "user",
+                                     "content": [{"type": "tool_result", "content": "ok"}]}},
+        _a("after the tool call"),
+    ])
+    got = assistant_text_after_last_user(path)
+    assert got == "before the tool call\n\nafter the tool call"
+
+
+def test_response_under_audit_gives_up_rather_than_hanging(tmp_path):
+    from forge_cc.transcript import response_under_audit
+
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [_a("stale"), _u("prompt")])
+    assert response_under_audit(path, timeout=0) == ""
+
+
+def test_response_under_audit_returns_the_fresh_reply(tmp_path):
+    from forge_cc.transcript import response_under_audit
+
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [_u("prompt"), _a("fresh reply")])
+    assert response_under_audit(path, timeout=0) == "fresh reply"
+
+
+def test_stop_hook_does_not_block_on_a_stale_transcript(tmp_path, monkeypatch):
+    """End to end: the race must not produce a block."""
+    from forge_cc import handlers
+
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("FORGE_TRANSCRIPT_WAIT", "0")
+
+    def never_called(*_a, **_k):
+        raise AssertionError("the auditor must not run on a stale transcript")
+
+    monkeypatch.setattr("lib.auditor.audit_output", never_called)
+
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [_a("previous turn"), _u("new prompt")])
+
+    from forge_cc.cli import main as cli_main
+    cli_main(["set-mode", "forge", "--session-id", "st1"])
+
+    out = handlers.stop({
+        "session_id": "st1", "cwd": str(tmp_path),
+        "transcript_path": str(path), "stop_hook_active": False,
+    })
+    assert out == {}

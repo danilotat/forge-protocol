@@ -30,7 +30,10 @@ from .paths import (
     cli_path,
     ensure_importable,
     get_current_session,
+    audit_blocks,
+    bump_audit_blocks,
     modes_dir,
+    reset_audit_blocks,
     set_current_session,
     set_mode_request,
     souls_dir,
@@ -71,6 +74,22 @@ def _flag(name: str, default: bool) -> bool:
     if raw is None or raw == "":
         return default
     return raw.strip().lower() not in _FALSEY
+
+
+def _max_revisions() -> int:
+    """How many times one turn may be sent back by the auditor.
+
+    One revision is the honest default: the point is to catch a violation and
+    give the model a chance to fix it, not to grind the user through four
+    drafts of the same answer at ~7s of audit each.
+    """
+    raw = os.environ.get("FORGE_MAX_REVISIONS")
+    if not raw:
+        return 1
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 1
 
 
 def _suppressed() -> bool:
@@ -297,6 +316,9 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
     if requested:
         set_mode_request(requested, payload.get("cwd"))
 
+    # A new user turn gets a fresh revision budget for the output audit.
+    reset_audit_blocks(payload.get("cwd"))
+
     # Replaces forge_log: one write, no round-trip through the helpers.
     session.message_count += 1
     session.updated_at = time.time()
@@ -460,19 +482,27 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
     if _suppressed():
         return {}
 
-    # A blocking Stop hook re-enters the agent. Without this guard the session
-    # would bounce between "revise" and "still not compliant" forever.
+    # A blocking Stop hook re-enters the agent, so blocking needs a ceiling.
+    # `stop_hook_active` is necessary but NOT sufficient: measured against
+    # Claude Code 2.1.258, a second block within the same turn still arrives
+    # with the flag false, so relying on it alone lets the audit demand
+    # revision after revision. We keep our own budget per user turn.
     if payload.get("stop_hook_active"):
+        return {}
+    if audit_blocks(payload.get("cwd")) >= _max_revisions():
         return {}
 
     sm, session, mode = _session_and_mode(payload)
     if mode is None or session.current_mode not in THINKING_MODES:
         return {}
 
-    from .transcript import last_assistant_text, last_user_text
+    from .transcript import last_user_text, response_under_audit
 
     transcript_path = payload.get("transcript_path")
-    response = last_assistant_text(transcript_path)
+    # Anchored on the user's turn, not "newest assistant message": the hook
+    # races the transcript write, and auditing the previous turn's response
+    # blocks a reply nobody judged.
+    response = response_under_audit(transcript_path)
     if not response:
         return {}
 
@@ -488,6 +518,8 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
         return {}
     if audit.compliant or not audit.violations:
         return {}
+
+    bump_audit_blocks(payload.get("cwd"))
 
     for v in audit.violations:
         sm.log_violation(

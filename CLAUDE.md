@@ -93,8 +93,14 @@ guardrail for the ordinary paths, with the output audit as the real backstop. Do
   to `$FORGE_STATE_DIR/audit/hooks.jsonl` (`hookio._trace`) for tailing while you drive Claude Code. It records the
   decision, not the content, and carries only an exception *type* name — same rule as the auditor's `error`. Tracing
   must never raise: a broken trace is not worth a failed hook.
-- **The `Stop` hook must always honor `stop_hook_active`.** Blocking on Stop re-enters the agent; without the guard the
-  session bounces between "revise" and "still not compliant" forever.
+- **The `Stop` hook must honor `stop_hook_active` AND its own revision budget.** Blocking on Stop re-enters the agent.
+  The flag is necessary but not sufficient: measured on Claude Code 2.1.258, a second block within the same turn still
+  arrives with `stop_hook_active` false, so `handlers._max_revisions()` (`FORGE_MAX_REVISIONS`, default 1) caps it and
+  `UserPromptSubmit` resets the budget each turn. Do not drop either half.
+- **Audit only assistant text written after the user's last message** (`transcript.response_under_audit`). The hook
+  races Claude Code's transcript write; reading the newest assistant entry unconditionally returned the *previous*
+  turn's reply and blocked a response nobody had judged, quoting a banner from two turns earlier. Waiting is bounded
+  by `FORGE_TRANSCRIPT_WAIT` and auditing nothing is the correct fallback — never audit stale text.
 - `PostToolUse` is the wrong event for output validation — it fires after tool calls, never after a response.
 - Executor mode gets zero per-turn work: no audit, no write-lock, no checkpoints. That is a feature, not an oversight.
 

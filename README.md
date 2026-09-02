@@ -238,11 +238,18 @@ Run the same test now and the model reports back instead:
 
 When a thinking mode's turn ends, the `Stop` hook pulls the last assistant message out of the transcript and hands it to an independent auditor (see [below](#the-adversarial-auditor)). If the auditor finds violations, the hook blocks with the rule, the reason, and a verbatim quote, and the agent gets another turn to fix it. Three properties keep that from becoming a trap:
 
-- It honors `stop_hook_active`, so a blocked turn is never re-blocked — the session cannot bounce between "revise" and "still not compliant" forever.
+- **One revision per turn.** `stop_hook_active` alone is not enough: measured against Claude Code 2.1.258, a second block inside the same turn still arrives with that flag false, so the plugin keeps its own per-turn budget (`FORGE_MAX_REVISIONS`, default 1). Without it the auditor can demand draft after draft at ~7-9s each.
+- **The audit is anchored to your turn.** The Stop hook races Claude Code's transcript write, and reading "the newest assistant message" can return the *previous* turn's reply — which once produced a block quoting a mode-switch banner from two turns earlier. The hook now only audits assistant text written after your last message, waits up to `FORGE_TRANSCRIPT_WAIT` seconds for it to appear, and audits nothing rather than something stale.
 - An auditor failure never blocks anything. Any error — timeout, missing binary, unparseable reply — is treated as "no finding".
 - `FORGE_OUTPUT_BLOCK=0` downgrades a finding from a block to a plain notification.
 
 Every hook is wrapped so that an unexpected exception exits 0 with no output: a crashed hook would be worse than a skipped one, so Claude Code proceeds exactly as if the plugin were not installed. `FORGE_HOOK_DEBUG=1` prints the traceback instead of swallowing it.
+
+### You will see the draft and the revision
+
+This is worth knowing before it surprises you. A blocking `Stop` hook fires *after* the response has been rendered, so when the auditor rejects a reply you see the rejected draft, then Claude Code's "Stop hook error" panel with the violation list, then the revised answer. That is not debug output and not a double-run — it is what blocking on `Stop` looks like, and Claude Code offers no pre-response hook that could catch a violation before you read it.
+
+If you would rather see a single clean answer, set `FORGE_OUTPUT_BLOCK=0`: the finding is surfaced as a notice and nothing is rewritten. You keep the audit and lose the automatic correction. `FORGE_MAX_REVISIONS=1` (the default) at least bounds it to one rewrite.
 
 ### Executor mode has zero overhead, by design
 
@@ -264,6 +271,8 @@ Everything is an environment variable; the plugin manifest has no field for decl
 | `FORGE_INPUT_AUDIT_ALWAYS` | off | Set to `1` to audit entry rules on every turn instead of only the first in a mode |
 | `FORGE_INPUT_AUDITOR_MODEL` | `haiku` | Model for the cheap entry-rule check |
 | `FORGE_OUTPUT_BLOCK` | on | Set to `0` to report output violations as a notification instead of blocking the turn |
+| `FORGE_MAX_REVISIONS` | `1` | How many times one turn may be sent back by the auditor. `0` disables blocking |
+| `FORGE_TRANSCRIPT_WAIT` | `2.0` | Seconds to wait for Claude Code to flush the response before auditing it |
 | `FORGE_STATE_DIR` | `~/.forge-state` | Where session JSON and canary history live |
 | `FORGE_MODES_DIR` | `<plugin>/modes` | Override the mode-definition directory |
 | `FORGE_SESSION_ID` | resolved automatically | Pin the Forge session id (otherwise `SessionStart` records it and the CLI reads it back, keyed by working directory) |
