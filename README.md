@@ -228,6 +228,8 @@ Four things that used to open the lock and no longer do, found by auditing it ra
 | A missing or corrupt `modes/` directory failed **open** | Fails closed — the session's chosen mode is honoured even when its definition will not load |
 | `sed --in-place`, `&>`, `cp`, `mv`, `git checkout --`, `python -c` all passed | All denied |
 
+A fifth, found by asking whether answering a question was enough to unlock a blocked write: **mentioning a mode used to switch it.** The command was matched anywhere in the prompt, so *"why did you suggest `/executor-mode`?"* left Forge mode and unlocked the write tools — and since a mode-mismatch notice tells the model to say "that's `/executor-mode`", quoting it back did the same. Only a real invocation counts now: Claude Code's `<command-name>` wrapper, or a prompt that *begins* with the command. Answering a question never changes the mode.
+
 One that remains by design: any exception inside the hook exits 0 and allows the tool, because a crashed hook must not break your session. That is a deliberate trade, and `FORGE_HOOK_DEBUG=1` is how you find out it happened — it is how the `import json` bug in the background worker was caught.
 
 ### A mode the model can leave is not a mode

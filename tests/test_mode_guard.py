@@ -45,8 +45,11 @@ def _run(capsys, *argv: str) -> tuple[int, dict]:
         ("/executor-mode", "executor"),
         ("/forge-mode", "forge"),
         ("/anvil-mode please", "anvil"),
-        ("switch me to /crucible-mode", "crucible"),
+        ("  /crucible-mode", "crucible"),
         ("/EXECUTOR-MODE", "executor"),
+        # a mention is not an invocation — see test_mentioning_a_mode_does_not_switch
+        ("why did you suggest /executor-mode?", None),
+        ("switch me to /crucible-mode", None),
         ("write a file for me", None),
         ("use executor mode", None),  # prose is not the slash command
         ("", None),
@@ -578,3 +581,36 @@ def test_shell_write_forms_that_used_to_slip_through(command):
 )
 def test_read_only_work_still_runs(command):
     assert bash_write_intent(command) is None, command
+
+
+def test_mentioning_a_mode_does_not_switch_or_unlock(capsys, tmp_path):
+    """Answering a question must not unlock a previously blocked Write.
+
+    It did not — but *asking about* a mode used to. `requested_mode` matched
+    the command anywhere in the prompt, so "why did you suggest
+    /executor-mode?" left Forge mode and unlocked the write tools. The modes'
+    own mismatch notice tells the model to say "that's /executor-mode", so
+    quoting it back was a likely accident rather than a corner case.
+    """
+    from forge_cc import handlers
+
+    _run(capsys, "set-mode", "forge", "--session-id", "mention")
+
+    def turn(prompt):
+        handlers.user_prompt_submit({"session_id": "mention", "cwd": str(tmp_path),
+                                     "prompt": prompt})
+        _code, state = _run(capsys, "state", "--session-id", "mention")
+        return state["current_mode"]
+
+    # answering the assistant's question changes nothing
+    assert turn("I was testing whether the lock holds") == "forge"
+    # asking about the mode is not requesting it
+    assert turn("why did you suggest /executor-mode for that?") == "forge"
+    # neither is quoting the assistant's own suggestion back
+    assert turn("if it's literally just the file, that's /executor-mode") == "forge"
+    # the write stays blocked throughout
+    assert _deny(_write(tmp_path, session="mention"))
+
+    # and an actual invocation still works
+    assert turn("/executor-mode") == "executor"
+    assert not _deny(_write(tmp_path, session="mention"))

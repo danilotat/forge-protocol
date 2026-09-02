@@ -135,10 +135,16 @@ guardrail for the ordinary paths, with the output audit as the real backstop. Do
 - The switch becomes deterministic — the model cannot forget it, botch it, or reorder it relative to the rules
   injection.
 
-`requested_mode` must match **every** invocation form: bare (`/forge-mode`, when loaded via `--plugin-dir`),
-namespaced (`/forge-protocol:forge-mode`, once installed), and Claude Code's `<command-name>` wrapper. It matched
-only the bare form at first, which meant an installed user typing `/forge-protocol:executor-mode` was refused their
-own mode switch by the consent gate. A leading `/` or `:` is required so prose does not count as consent.
+`requested_mode` matches an **invocation**, never a mention: Claude Code's `<command-name>` wrapper, or a prompt
+that *begins* with `/[namespace:]<mode>-mode`. Both failure directions have been hit:
+
+- Matching only the bare `/forge-mode` meant an installed user typing `/forge-protocol:executor-mode` was refused
+  their own mode switch by the consent gate.
+- Matching the command *anywhere* meant "why did you suggest /executor-mode?" left the thinking mode and unlocked
+  the write tools. A mode-mismatch notice instructs the model to say "that's /executor-mode", so quoting it back was
+  a likely accident, not a corner case.
+
+Prose therefore records no consent at all — the same authorisation gates the switch and the CLI, so they must agree.
 
 ### Mode changes: relaxing requires the user
 

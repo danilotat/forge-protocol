@@ -157,25 +157,42 @@ def _rule_lines(items: list[str]) -> str:
     return "\n".join(f"  - {item}" for item in items)
 
 
-#: A mode command in the raw prompt, in any of the forms Claude Code uses:
-#: `/forge-mode` when the plugin is loaded bare, and
-#: `/forge-protocol:forge-mode` — plus a `<command-name>` wrapper — once it is
-#: installed under its plugin namespace. Requiring a leading `/` or `:` keeps
-#: prose ("the executor-mode skill is nice") from counting as consent.
-_MODE_COMMAND_RE = re.compile(r"[/:]\s*(?:[a-z0-9._-]+:)?(forge|anvil|crucible|executor)-mode\b")
+#: An actual slash-command invocation, in the two shapes Claude Code produces:
+#: the `<command-name>` wrapper it adds for a registered command, and a bare
+#: leading `/mode` when the plugin is loaded with --plugin-dir. Both the
+#: namespaced (`/forge-protocol:forge-mode`) and bare forms are accepted.
+_COMMAND_TAG_RE = re.compile(
+    r"<command-name>\s*/?(?:[a-z0-9._-]+:)?(forge|anvil|crucible|executor)-mode\b"
+)
+_LEADING_COMMAND_RE = re.compile(
+    r"^\s*/(?:[a-z0-9._-]+:)?(forge|anvil|crucible|executor)-mode\b"
+)
 
 
 def requested_mode(prompt: str) -> str | None:
-    """Which mode, if any, the user's own prompt asked for.
+    """Which mode, if any, the user *invoked* — not merely mentioned.
 
-    Matched against the raw prompt the user submitted — which is the whole
-    point: it distinguishes "the user typed /executor-mode" from "the model
-    decided to invoke the executor-mode skill so it could write a file".
+    This distinguishes three things that look similar in the raw prompt:
+
+    1. `/executor-mode`                        — an invocation. Honoured.
+    2. `why did you suggest /executor-mode?`   — a question ABOUT the mode.
+    3. quoting the assistant's own "that's `/executor-mode`" back at it.
+
+    Matching the command anywhere in the prompt treated all three as consent,
+    so asking about a mode silently left the thinking mode and unlocked the
+    write tools. Since the modes' own mismatch notice tells the model to say
+    "that's /executor-mode", case 3 was a likely accident, not a corner case.
+    Only a real invocation — the command tag, or the prompt beginning with the
+    command — counts now.
     """
     if not prompt:
         return None
-    match = _MODE_COMMAND_RE.search(prompt.lower())
-    return match.group(1) if match else None
+    lowered = prompt.lower()
+    for pattern in (_COMMAND_TAG_RE, _LEADING_COMMAND_RE):
+        match = pattern.search(lowered)
+        if match:
+            return match.group(1)
+    return None
 
 
 _SET_MODE_RE = re.compile(r"\bforge\b[^\n|;&]*\bset-mode\b")
