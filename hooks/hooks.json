@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.py session-start",
             "timeout": 15
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/user-prompt-submit.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.py user-prompt-submit",
             "timeout": 90
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/pre-tool-use.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.py pre-tool-use",
             "timeout": 10
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/stop.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.py stop",
             "timeout": 90
           }
         ]
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/subagent-stop.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.py subagent-stop",
             "timeout": 90
           }
         ]
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-end.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.py session-end",
             "timeout": 10
           }
         ]
