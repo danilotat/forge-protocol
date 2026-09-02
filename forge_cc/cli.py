@@ -33,10 +33,6 @@ from .paths import (
     state_dir,
 )
 
-#: Modes that apply cognitive friction. Kept in step with
-#: forge_cc.handlers.THINKING_MODES.
-THINKING_MODES = frozenset({"forge", "anvil", "crucible"})
-
 ensure_importable()
 
 from lib import auditor  # noqa: E402
@@ -46,6 +42,8 @@ from lib.checkpoints import check_checkpoint, messages_until_checkpoint  # noqa:
 from lib.modes import VALID_MODE_IDS, Mode, load_all_modes  # noqa: E402
 from lib.state import StateManager  # noqa: E402
 from lib.validator import get_input_rules, get_output_rules  # noqa: E402
+
+from .handlers import THINKING_MODES  # noqa: E402  (single source of truth)
 
 
 def _emit(payload: dict[str, Any]) -> int:
@@ -131,9 +129,26 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
             "message": f"Already in {args.mode} mode.",
         })
 
-    # Dropping out of a thinking mode removes the user's friction, so it takes
-    # the user's own say-so. Adding friction never does.
-    relaxing = previous in THINKING_MODES and args.mode not in THINKING_MODES
+    current = modes.get(previous)
+    target = modes[args.mode]
+
+    # `allowed_to` in the mode YAML is now load-bearing rather than decorative.
+    if current and current.transitions.allowed_to and args.mode not in current.transitions.allowed_to:
+        allowed = ", ".join(sorted(current.transitions.allowed_to))
+        return _fail(
+            f"{previous} mode does not allow switching to {args.mode}. "
+            f"Allowed: {allowed}"
+        )
+
+    # Dropping out of a mode that asked to be confirmed, into one that didn't,
+    # removes the user's friction — so it takes the user's own say-so. Adding
+    # friction, or moving between two confirmed modes, never does. Derived from
+    # `transitions.confirm_switch` so a new mode governs its own gating.
+    relaxing = bool(
+        current
+        and current.transitions.confirm_switch
+        and not target.transitions.confirm_switch
+    )
     forced = False
     if relaxing:
         consent = consume_mode_request()
@@ -169,7 +184,7 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
         "message": f"Switched from {previous} to {args.mode} mode.",
         "input_rules": mode.input_rules,
         "forbidden_behaviors": mode.behaviors.forbidden,
-        "write_tools_blocked": args.mode in ("forge", "anvil", "crucible"),
+        "write_tools_blocked": args.mode in THINKING_MODES,
     })
 
 
