@@ -3,21 +3,32 @@
 The Forge Protocol's original design asks the SAME orchestrator LLM that
 produced a response to judge whether it complied with the mode's rules.
 LLMs are poor at that kind of self-judgment; they readily rubber-stamp
-their own work. This module fixes that by calling a *different* model
-instance (Claude Sonnet by default) to audit compliance independently.
+their own work. This module fixes that by asking a *different* model
+instance to audit compliance independently.
 
-The auditor is OPTIONAL and opt-in. If disabled or the anthropic SDK is
-not installed, the validator tools fall back to returning rules for the
-orchestrator to self-evaluate (the original behavior).
+Transport: a headless ``claude -p`` subprocess. That reuses whatever
+credentials Claude Code already has, so the auditor needs **no API key**,
+no cloud project, and no ``anthropic`` SDK — a working Claude Code
+subscription is the only requirement.
+
+Three flags carry the design and should not be dropped:
+
+* ``--safe-mode``  disables plugins, hooks, skills and CLAUDE.md for the
+  child process. Without it the audit call re-triggers Forge Protocol's
+  own hooks and recurses. Auth still resolves normally under safe mode.
+  (``--bare`` looks like it would do the same job but forces API-key auth
+  — it would reintroduce the dependency this transport exists to remove.)
+* ``--tools ""``   the auditor is a judge, not an agent. No filesystem,
+  no bash, no web.
+* ``--json-schema`` server-side structured output, so the reply is parsed
+  for us instead of scraped out of prose.
 
 Configuration via environment variables:
 
-    FORGE_AUDITOR_ENABLED   "1" to enable (default: disabled)
-    FORGE_AUDITOR_MODEL     Claude model id (default: claude-sonnet-4-6)
-    FORGE_AUDITOR_BACKEND   "anthropic" | "vertex"   (default: anthropic)
-    ANTHROPIC_API_KEY       Required for anthropic backend
-    VERTEX_PROJECT          Required for vertex backend
-    VERTEX_REGION           Optional, defaults to us-east5
+    FORGE_AUDITOR_ENABLED   "0"/"false"/"no"/"off" to disable (default: enabled)
+    FORGE_AUDITOR_MODEL     CLI model alias or id (default: sonnet)
+    FORGE_AUDITOR_CMD       path to the claude binary (default: "claude")
+    FORGE_AUDITOR_TIMEOUT   subprocess timeout in seconds (default: 60)
 
 Use the same variables for canary scoring — the auditor is shared.
 """
@@ -26,17 +37,28 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from .validator import InputRules, OutputRules
 
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
-DEFAULT_BACKEND = "anthropic"
-DEFAULT_VERTEX_REGION = "us-east5"
-MAX_TOKENS = 1024
+DEFAULT_MODEL = "sonnet"
+DEFAULT_CMD = "claude"
+DEFAULT_TIMEOUT = 60
+
+#: A runner takes (system_prompt, user_prompt, json_schema) and returns the
+#: parsed JSON object the model produced. It raises on any failure; callers
+#: convert that into a non-blocking ``error`` result. Tests inject one of
+#: these instead of spawning a subprocess.
+Runner = Callable[[str, str, dict], dict]
+
+#: Marks the auditor's own child process so Forge's hooks no-op inside it.
+#: Belt and braces alongside ``--safe-mode``.
+CHILD_ENV_VAR = "FORGE_AUDITOR_CHILD"
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +103,58 @@ class CanaryScore:
 
 
 # ---------------------------------------------------------------------------
+# Response schemas (passed to --json-schema)
+# ---------------------------------------------------------------------------
+
+def _violations_schema(kinds: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "compliant": {"type": "boolean"},
+            "violations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "rule": {"type": "string"},
+                        "kind": {"type": "string", "enum": kinds},
+                        "quote": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["rule", "kind", "quote", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["compliant", "violations"],
+        "additionalProperties": False,
+    }
+
+
+OUTPUT_AUDIT_SCHEMA = _violations_schema(["required_missing", "forbidden"])
+INPUT_AUDIT_SCHEMA = _violations_schema(["input"])
+
+CANARY_SCORE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "dimensions": {
+            "type": "object",
+            "properties": {
+                "clarity": {"type": "integer", "minimum": 1, "maximum": 5},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 5},
+                "independence": {"type": "integer", "minimum": 1, "maximum": 5},
+            },
+            "required": ["clarity", "depth", "independence"],
+            "additionalProperties": False,
+        },
+        "notes": {"type": "string"},
+    },
+    "required": ["dimensions", "notes"],
+    "additionalProperties": False,
+}
+
+
+# ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
 
@@ -106,24 +180,10 @@ RESPONSE TO AUDIT:
 {response}
 ---
 
-Return strict JSON with this exact shape. No prose outside the JSON.
-
-{{
-  "compliant": true|false,
-  "violations": [
-    {{
-      "rule": "<exact rule text that was violated>",
-      "kind": "required_missing" | "forbidden",
-      "quote": "<verbatim quote from the response, or empty for required_missing>",
-      "reason": "<one-sentence explanation>"
-    }}
-  ]
-}}
-
 Rules for judgment:
 - If a REQUIRED behavior is not clearly demonstrated, include it with kind="required_missing" and quote="".
 - If a FORBIDDEN behavior is present, include it with kind="forbidden" and a verbatim quote.
-- If fully compliant, return {{"compliant": true, "violations": []}}.
+- If fully compliant, return compliant=true with an empty violations array.
 """
 
 
@@ -145,21 +205,9 @@ USER INPUT:
 {user_input}
 ---
 
-Return strict JSON. No prose outside the JSON.
-
-{{
-  "compliant": true|false,
-  "violations": [
-    {{
-      "rule": "<exact rule text not met>",
-      "kind": "input",
-      "quote": "",
-      "reason": "<one-sentence explanation of what's missing>"
-    }}
-  ]
-}}
-
-If every rule is met, return {{"compliant": true, "violations": []}}.
+For every rule that is not met, add a violation with kind="input", quote="",
+and a one-sentence reason explaining what is missing. If every rule is met,
+return compliant=true with an empty violations array.
 """
 
 
@@ -185,12 +233,7 @@ Score the response on these dimensions, each 1 (poor) to 5 (excellent):
 - depth: shows genuine reasoning, not templated filler
 - independence: reads like the user's own voice, not pasted AI output
 
-Return strict JSON. No prose outside the JSON.
-
-{{
-  "dimensions": {{"clarity": <1-5>, "depth": <1-5>, "independence": <1-5>}},
-  "notes": "<one sentence on the strongest or weakest aspect>"
-}}
+Add one sentence of notes on the strongest or weakest aspect.
 """
 
 
@@ -198,66 +241,131 @@ Return strict JSON. No prose outside the JSON.
 # Config
 # ---------------------------------------------------------------------------
 
+_FALSEY = ("0", "false", "no", "off")
+
+
 def is_enabled() -> bool:
-    return os.environ.get("FORGE_AUDITOR_ENABLED", "").lower() in ("1", "true", "yes", "on")
+    """The auditor is on by default.
+
+    It needs no API key and no paid extra any more, so the honest default is
+    enabled. Set FORGE_AUDITOR_ENABLED=0 to fall back to orchestrator
+    self-evaluation.
+    """
+    raw = os.environ.get("FORGE_AUDITOR_ENABLED")
+    if raw is None or raw == "":
+        return True
+    return raw.strip().lower() not in _FALSEY
 
 
 def model_name() -> str:
-    return os.environ.get("FORGE_AUDITOR_MODEL", DEFAULT_MODEL)
+    return os.environ.get("FORGE_AUDITOR_MODEL") or DEFAULT_MODEL
 
 
-def backend_name() -> str:
-    return os.environ.get("FORGE_AUDITOR_BACKEND", DEFAULT_BACKEND).lower()
+def cli_path() -> str:
+    return os.environ.get("FORGE_AUDITOR_CMD") or DEFAULT_CMD
 
 
-def _build_client() -> Any:
-    backend = backend_name()
+def timeout_seconds() -> int:
+    raw = os.environ.get("FORGE_AUDITOR_TIMEOUT")
+    if not raw:
+        return DEFAULT_TIMEOUT
     try:
-        if backend == "vertex":
-            from anthropic import AnthropicVertex
-            project = os.environ.get("VERTEX_PROJECT")
-            if not project:
-                raise RuntimeError("VERTEX_PROJECT not set for vertex auditor backend")
-            region = os.environ.get("VERTEX_REGION", DEFAULT_VERTEX_REGION)
-            return AnthropicVertex(project_id=project, region=region)
-        from anthropic import Anthropic
-        return Anthropic()
-    except ImportError as e:
-        raise RuntimeError(
-            "anthropic SDK not installed. Run: pip install anthropic "
-            "(or pip install 'forge-protocol[vertex]' for Vertex AI)"
-        ) from e
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_TIMEOUT
+
+
+def is_available() -> bool:
+    """True if the auditor is enabled and its transport can actually run."""
+    if not is_enabled():
+        return False
+    if os.environ.get(CHILD_ENV_VAR):
+        return False
+    cmd = cli_path()
+    return bool(shutil.which(cmd) or os.path.isfile(cmd))
 
 
 # ---------------------------------------------------------------------------
-# Low-level invoke helper
+# Transport
 # ---------------------------------------------------------------------------
 
-def _invoke(client: Any, system: str, user: str) -> str:
-    msg = client.messages.create(
-        model=model_name(),
-        max_tokens=MAX_TOKENS,
-        system=system,
-        messages=[{"role": "user", "content": user}],
+def build_argv(system: str, schema: dict, user: str) -> list[str]:
+    """Assemble the headless `claude -p` command line. Exposed for tests."""
+    return [
+        cli_path(),
+        "-p",
+        user,
+        "--model", model_name(),
+        "--system-prompt", system,
+        "--json-schema", json.dumps(schema),
+        "--output-format", "json",
+        "--tools", "",
+        "--safe-mode",
+        "--no-session-persistence",
+    ]
+
+
+def _cli_runner(system: str, user: str, schema: dict) -> dict[str, Any]:
+    """Run one audit through the Claude Code CLI and return the parsed object.
+
+    Raises on any failure — callers turn that into a non-blocking result.
+    """
+    if os.environ.get(CHILD_ENV_VAR):
+        raise RuntimeError("refusing to nest auditor calls")
+
+    env = dict(os.environ)
+    env[CHILD_ENV_VAR] = "1"
+
+    proc = subprocess.run(
+        build_argv(system, schema, user),
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds(),
+        env=env,
+        check=False,
     )
-    parts = msg.content or []
-    for part in parts:
-        text = getattr(part, "text", None)
-        if text:
-            return text
-    return ""
+    if proc.returncode != 0:
+        # Deliberately does not carry stderr — see the note on `error` below.
+        raise RuntimeError(f"claude exited {proc.returncode}")
+
+    envelope = json.loads(proc.stdout)
+    if envelope.get("is_error"):
+        raise RuntimeError("claude reported is_error")
+
+    structured = envelope.get("structured_output")
+    if isinstance(structured, dict):
+        return structured
+
+    # Fall back to the text result when structured output is unavailable.
+    result = envelope.get("result")
+    if isinstance(result, str) and result.strip():
+        return json.loads(result)
+
+    raise ValueError("no structured output in auditor response")
 
 
-def _extract_json(text: str) -> dict[str, Any]:
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError(f"no JSON object in auditor response: {text[:200]!r}")
-    return json.loads(text[start : end + 1])
+def _run(runner: Runner | None, system: str, user: str, schema: dict) -> dict[str, Any]:
+    return (runner or _cli_runner)(system, user, schema)
 
 
 def _fmt_bullets(items: list[str]) -> str:
     return "\n".join(f"- {s}" for s in items) if items else "(none)"
+
+
+def _parse_violations(parsed: dict[str, Any], default_kind: str) -> list[RuleViolation]:
+    raw = parsed.get("violations") or []
+    if not isinstance(raw, list):
+        return []
+    return [
+        RuleViolation(
+            rule=str(v.get("rule", "")),
+            kind=str(v.get("kind", default_kind)),
+            quote=str(v.get("quote", "")),
+            reason=str(v.get("reason", "")),
+        )
+        for v in raw
+        if isinstance(v, dict)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -268,13 +376,13 @@ def audit_output(
     response: str,
     rules: "OutputRules",
     *,
-    client: Any | None = None,
+    runner: Runner | None = None,
 ) -> AuditResult | None:
     """Audit a response against a mode's output rules.
 
     Returns None if the auditor is disabled (caller should fall back to
     self-evaluation). Returns an AuditResult with ``error`` populated on
-    backend/parse failure — by convention, audit errors do not block the
+    transport/parse failure — by convention, audit errors do not block the
     response (``compliant`` defaults to True on error).
     """
     if not is_enabled():
@@ -282,7 +390,6 @@ def audit_output(
 
     model = model_name()
     try:
-        c = client if client is not None else _build_client()
         user = _OUTPUT_AUDIT_USER_TEMPLATE.format(
             mode_name=rules.mode_name,
             mode_id=rules.mode,
@@ -290,24 +397,14 @@ def audit_output(
             forbidden=_fmt_bullets(rules.forbidden_behaviors),
             response=response,
         )
-        raw = _invoke(c, _OUTPUT_AUDIT_SYSTEM, user)
-        parsed = _extract_json(raw)
-        violations = [
-            RuleViolation(
-                rule=str(v.get("rule", "")),
-                kind=str(v.get("kind", "forbidden")),
-                quote=str(v.get("quote", "")),
-                reason=str(v.get("reason", "")),
-            )
-            for v in parsed.get("violations", [])
-        ]
+        parsed = _run(runner, _OUTPUT_AUDIT_SYSTEM, user, OUTPUT_AUDIT_SCHEMA)
         return AuditResult(
             compliant=bool(parsed.get("compliant", True)),
-            violations=violations,
+            violations=_parse_violations(parsed, "forbidden"),
             auditor_model=model,
-            raw_response=raw,
+            raw_response=json.dumps(parsed),
         )
-    except Exception as e:  # noqa: BLE001 — auditor must never crash the tool
+    except Exception as e:  # noqa: BLE001 — auditor must never crash the caller
         return AuditResult(
             compliant=True,
             violations=[],
@@ -321,7 +418,7 @@ def audit_input(
     user_input: str,
     rules: "InputRules",
     *,
-    client: Any | None = None,
+    runner: Runner | None = None,
 ) -> AuditResult | None:
     """Audit a user input against a mode's input rules."""
     if not is_enabled():
@@ -332,29 +429,21 @@ def audit_input(
 
     model = model_name()
     try:
-        c = client if client is not None else _build_client()
         user = _INPUT_AUDIT_USER_TEMPLATE.format(
             mode_name=rules.mode_name,
             mode_id=rules.mode,
             rules=_fmt_bullets(rules.rules),
             user_input=user_input,
         )
-        raw = _invoke(c, _INPUT_AUDIT_SYSTEM, user)
-        parsed = _extract_json(raw)
-        violations = [
-            RuleViolation(
-                rule=str(v.get("rule", "")),
-                kind="input",
-                quote=str(v.get("quote", "")),
-                reason=str(v.get("reason", "")),
-            )
-            for v in parsed.get("violations", [])
-        ]
+        parsed = _run(runner, _INPUT_AUDIT_SYSTEM, user, INPUT_AUDIT_SCHEMA)
+        violations = _parse_violations(parsed, "input")
+        for v in violations:
+            v.kind = "input"
         return AuditResult(
             compliant=bool(parsed.get("compliant", True)),
             violations=violations,
             auditor_model=model,
-            raw_response=raw,
+            raw_response=json.dumps(parsed),
         )
     except Exception as e:  # noqa: BLE001
         return AuditResult(
@@ -370,7 +459,7 @@ def score_canary(
     prompt: str,
     response: str,
     *,
-    client: Any | None = None,
+    runner: Runner | None = None,
 ) -> CanaryScore:
     """Score a user's unassisted canary response on clarity, depth, independence.
 
@@ -389,10 +478,8 @@ def score_canary(
 
     model = model_name()
     try:
-        c = client if client is not None else _build_client()
         user = _CANARY_SCORE_USER_TEMPLATE.format(prompt=prompt, response=response)
-        raw = _invoke(c, _CANARY_SCORE_SYSTEM, user)
-        parsed = _extract_json(raw)
+        parsed = _run(runner, _CANARY_SCORE_SYSTEM, user, CANARY_SCORE_SCHEMA)
         dims = {k: int(v) for k, v in (parsed.get("dimensions") or {}).items()}
         overall = sum(dims.values()) / len(dims) if dims else 0.0
         return CanaryScore(

@@ -2,7 +2,7 @@
 
 The canary system is the Forge Protocol's measurable-skill mechanism:
 the user answers a *fixed* set of prompts unassisted, we score each
-attempt with the adversarial auditor (Claude Sonnet), and compare scores
+attempt with the adversarial auditor (an independent Claude instance), and compare scores
 across time to detect whether the user's independent skills are drifting
 up or down.
 
@@ -193,7 +193,7 @@ def submit_canary(
     response: str,
     *,
     store: CanaryStore | None = None,
-    client: Any | None = None,
+    runner: auditor.Runner | None = None,
 ) -> tuple[CanaryAttempt, CanaryTrend]:
     """Score a user's unassisted response with the auditor, store it, return trend.
 
@@ -206,7 +206,7 @@ def submit_canary(
         raise ValueError(f"unknown canary prompt_id: {prompt_id!r}")
 
     store = store or CanaryStore()
-    score = auditor.score_canary(question["prompt"], response, client=client)
+    score = auditor.score_canary(question["prompt"], response, runner=runner)
     attempt = CanaryAttempt(
         timestamp=time.time(),
         prompt_id=prompt_id,
