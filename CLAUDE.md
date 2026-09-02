@@ -96,11 +96,17 @@ guardrail for the ordinary paths, with the output audit as the real backstop. Do
 
 ### Mode changes: relaxing requires the user
 
-Leaving a thinking mode removes the write-lock and the audit, so `forge set-mode` refuses unless
-`UserPromptSubmit` recorded a matching request from the **user's own raw prompt** (`handlers.requested_mode`).
-Entering a thinking mode or moving laterally between two needs no consent. This exists because a real model, denied
-`Write`, invoked `/executor-mode` itself and wrote the file legally — a mode the model can leave is not a mode.
-`--force` bypasses it for humans and logs a `mode:forced-relaxation` violation. Keep consent single-use.
+This exists because a real model, denied `Write`, invoked `/executor-mode` itself and wrote the file legally. A mode
+the model can leave is not a mode.
+
+Leaving a thinking mode removes the write-lock and the audit, so `forge set-mode` refuses unless `UserPromptSubmit`
+recorded a matching request from the **user's own raw prompt** (`handlers.requested_mode`). Consent is single-use.
+`--force` bypasses it for humans driving the CLI directly and logs a `mode:forced-relaxation` violation.
+
+Which transitions are gated comes from `transitions.confirm_switch` in the mode YAML: leaving a
+`confirm_switch: true` mode for one that is `false` is the relaxation that needs consent, while entering a mode or
+moving laterally does not. `transitions.allowed_to` is enforced too. Both fields were parsed and never read before —
+in this port *and* in the Hermes original — so keep them load-bearing rather than reverting to a hardcoded mode list.
 
 ### The `modes/*.json` twins
 
@@ -119,8 +125,7 @@ except `schema.yaml`. For a first-class new mode you also need:
 
 - `VALID_MODE_IDS` in `lib/modes.py`
 - `ModeRatios` in `lib/audit.py` (the dependency report)
-- `THINKING_MODES` in **both** `forge_cc/handlers.py` and `forge_cc/cli.py` (kept in step deliberately, so `cli.py`
-  need not import the handler module)
+- `THINKING_MODES` in `forge_cc/handlers.py` (which modes get the write-lock and the output audit)
 - `_MODE_COMMANDS` in `forge_cc/handlers.py` (so the user's slash command counts as consent)
 - `agents/<id>.md` and `skills/<id>-mode/SKILL.md`
 
