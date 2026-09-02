@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Forge Protocol CLI. The slash-command skills shell out to this."""
+
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+from forge_cc.cli import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
