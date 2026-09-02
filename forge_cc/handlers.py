@@ -469,13 +469,18 @@ def stop(payload: dict[str, Any]) -> dict[str, Any]:
     if mode is None or session.current_mode not in THINKING_MODES:
         return {}
 
-    from .transcript import last_assistant_text
+    from .transcript import last_assistant_text, last_user_text
 
-    response = last_assistant_text(payload.get("transcript_path"))
+    transcript_path = payload.get("transcript_path")
+    response = last_assistant_text(transcript_path)
     if not response:
         return {}
 
-    audit = auditor.audit_output(response, get_output_rules(mode))
+    audit = auditor.audit_output(
+        response,
+        get_output_rules(mode),
+        user_message=last_user_text(transcript_path),
+    )
     if audit is None:
         return {}  # disabled: the soul already asks for a self-check
     if audit.error:

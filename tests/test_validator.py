@@ -77,3 +77,44 @@ class TestOutputRules:
         rules = get_output_rules(executor_mode)
         assert len(rules.forbidden_behaviors) == 0
         assert len(rules.required_behaviors) > 0
+
+
+def test_output_rules_carry_conditional_behaviors():
+    """`conditional` must reach the auditor separately from `required`.
+
+    If it collapses back into `required`, the auditor demands every technique
+    in every reply — the over-strictness this split exists to fix.
+    """
+    from lib.modes import Behaviors, Metacognitive, Mode
+    from lib.validator import get_output_rules
+
+    mode = Mode(
+        id="t",
+        name="T",
+        description="d",
+        system_prompt_file="souls/t.md",
+        behaviors=Behaviors(
+            required=["always this"],
+            conditional=["periodically that"],
+            forbidden=["never the other"],
+        ),
+        input_rules=[],
+        metacognitive=Metacognitive(),
+    )
+
+    rules = get_output_rules(mode)
+    assert rules.required_behaviors == ["always this"]
+    assert rules.conditional_behaviors == ["periodically that"]
+    assert rules.forbidden_behaviors == ["never the other"]
+
+
+def test_conditional_defaults_to_empty_for_modes_without_it():
+    from lib.modes import Behaviors, Metacognitive, Mode
+    from lib.validator import get_output_rules
+
+    mode = Mode(
+        id="t", name="T", description="d", system_prompt_file="souls/t.md",
+        behaviors=Behaviors(required=["a"], forbidden=[]),
+        input_rules=[], metacognitive=Metacognitive(),
+    )
+    assert get_output_rules(mode).conditional_behaviors == []

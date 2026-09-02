@@ -6,7 +6,7 @@ the natural-language rules that the orchestrator LLM checks against.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .modes import Mode
 
@@ -26,6 +26,7 @@ class OutputRules:
     mode_name: str
     required_behaviors: list[str]
     forbidden_behaviors: list[str]
+    conditional_behaviors: list[str] = field(default_factory=list)
 
 
 def get_input_rules(mode: Mode) -> InputRules:
@@ -44,4 +45,5 @@ def get_output_rules(mode: Mode) -> OutputRules:
         mode_name=mode.name,
         required_behaviors=mode.behaviors.required,
         forbidden_behaviors=mode.behaviors.forbidden,
+        conditional_behaviors=mode.behaviors.conditional,
     )

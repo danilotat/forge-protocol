@@ -137,6 +137,29 @@ Mode rules live in **two** places by design — `behaviors`/`input_rules` in the
 auditor, the soul and agent files drive generation. Changing one without the other makes the auditor and the model
 disagree.
 
+### `behaviors.required` vs `behaviors.conditional`
+
+`required` is demanded of **every response**. `conditional` holds rules gated on a trigger or a cadence
+("periodically ...", "once the user has stated a position", "after revision") and is a violation only when the
+trigger occurred and the behavior is still absent. Keep `required` short, and state the trigger inside the rule text
+so the auditor can see it.
+
+This split is not cosmetic. With everything in `required`, the auditor demanded all seven of Forge's behaviors in
+every reply, and the only way to pass was to answer seven words with five labelled forcing functions, a steelman, an
+attack and a prediction demand. Calibrated friction became a wall of text — and a plugin that exhausting gets
+uninstalled, which protects nobody. `tests/test_modes.py` fails if a trigger-gated rule migrates back into
+`required`.
+
+Two guardrails hold the calibration, and both are load-bearing:
+
+- **Proportionality is encoded in the rule text**, not left to the judge — Forge's ordering rule itself says "3-5
+  questions for a substantive exchange, one or two for a brief one", and every thinking mode forbids burying a brief
+  message under the full apparatus.
+- **Proportionality governs how much, never whether.** The auditor prompt says so explicitly, because without it the
+  judge reads the whole block as licence to be lenient and stops catching a judgment-first response — which is the
+  violation that matters most. An ordering rule is broken whenever the order is wrong, however brief the reply.
+  `lib/auditor.py`'s prompt and `tests/test_auditor.py` pin both directions.
+
 ### Path & state resolution
 
 - Plugin root: `CLAUDE_PLUGIN_ROOT` (set by Claude Code inside hook commands) → the directory above `forge_cc/`.

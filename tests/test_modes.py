@@ -93,3 +93,51 @@ def test_load_nonexistent_mode():
 def test_load_nonexistent_dir():
     with pytest.raises(FileNotFoundError):
         load_all_modes("nonexistent_dir")
+
+
+def test_behaviors_parse_conditional(tmp_path):
+    import yaml
+
+    path = tmp_path / "m.yaml"
+    path.write_text(yaml.safe_dump({
+        "id": "m", "name": "M", "description": "d",
+        "system_prompt_file": "souls/m.md",
+        "behaviors": {
+            "required": ["r1"],
+            "conditional": ["c1", "c2"],
+            "forbidden": ["f1"],
+        },
+    }))
+    mode = load_mode(path)
+    assert mode.behaviors.required == ["r1"]
+    assert mode.behaviors.conditional == ["c1", "c2"]
+    assert mode.behaviors.forbidden == ["f1"]
+
+
+def test_shipped_modes_keep_trigger_gated_rules_out_of_required():
+    """Guards the fix for the over-strict auditor.
+
+    A rule with a cadence or precondition word in it must live in
+    `conditional`, not `required` — auditing "periodically ..." as a per-turn
+    requirement is what produced walls of text on one-line inputs.
+    """
+    from pathlib import Path
+
+    trigger_words = ("periodically", "when the user", "before providing", "after revision")
+    modes = load_all_modes(Path(__file__).parent.parent / "modes")
+    offenders = []
+    for mode_id, mode in modes.items():
+        for rule in mode.behaviors.required:
+            lowered = rule.lower()
+            if any(w in lowered for w in trigger_words):
+                offenders.append(f"{mode_id}: {rule}")
+    assert not offenders, "trigger-gated rules found in `required`: " + "; ".join(offenders)
+
+
+def test_thinking_modes_forbid_disproportionate_responses():
+    from pathlib import Path
+
+    modes = load_all_modes(Path(__file__).parent.parent / "modes")
+    for mode_id in ("forge", "anvil", "crucible"):
+        forbidden = " ".join(modes[mode_id].behaviors.forbidden).lower()
+        assert "scale the intervention" in forbidden, f"{mode_id} lost its proportionality rule"

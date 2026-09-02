@@ -384,3 +384,68 @@ def test_keyboard_interrupt_is_not_swallowed(monkeypatch):
     _enable_auditor(monkeypatch)
     with pytest.raises(KeyboardInterrupt):
         aud.audit_output("x", _output_rules(), runner=_Boom(KeyboardInterrupt()))
+
+
+# ---------------------------------------------------------------------------
+# The required / conditional split, and proportionality
+# ---------------------------------------------------------------------------
+
+def test_prompt_separates_conditional_from_required(monkeypatch):
+    """The judge must see conditional rules as gated, not as requirements."""
+    _enable_auditor(monkeypatch)
+    seen = {}
+
+    def runner(system, user, schema):
+        seen["user"] = user
+        return {"compliant": True, "violations": []}
+
+    rules = OutputRules(
+        mode="forge",
+        mode_name="Forge Mode",
+        required_behaviors=["lead with questions"],
+        forbidden_behaviors=["give a verdict"],
+        conditional_behaviors=["periodically ask the user to predict"],
+    )
+    aud.audit_output("a response", rules, runner=runner, user_message="hi")
+
+    prompt = seen["user"]
+    assert "CONDITIONAL BEHAVIORS" in prompt
+    assert "periodically ask the user to predict" in prompt
+    # the gating instruction the whole fix depends on
+    assert "ONLY if its trigger is present" in prompt
+    # proportionality must not be readable as permission to be lenient
+    assert "governs HOW MUCH" in prompt and "never WHETHER" in prompt
+
+
+def test_prompt_includes_the_user_message_for_proportionality(monkeypatch):
+    _enable_auditor(monkeypatch)
+    seen = {}
+
+    def runner(system, user, schema):
+        seen["user"] = user
+        return {"compliant": True, "violations": []}
+
+    rules = OutputRules(
+        mode="forge", mode_name="Forge Mode",
+        required_behaviors=["r"], forbidden_behaviors=["f"],
+    )
+    aud.audit_output("resp", rules, runner=runner, user_message="I was testing the lock")
+
+    assert "I was testing the lock" in seen["user"]
+    assert "USER'S MESSAGE THAT PROMPTED THE RESPONSE" in seen["user"]
+
+
+def test_missing_user_message_is_labelled_not_blank(monkeypatch):
+    _enable_auditor(monkeypatch)
+    seen = {}
+
+    def runner(system, user, schema):
+        seen["user"] = user
+        return {"compliant": True, "violations": []}
+
+    rules = OutputRules(
+        mode="forge", mode_name="Forge Mode",
+        required_behaviors=["r"], forbidden_behaviors=["f"],
+    )
+    aud.audit_output("resp", rules, runner=runner)
+    assert "(not available)" in seen["user"]

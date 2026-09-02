@@ -36,11 +36,57 @@ def _text_from_content(content: Any) -> str:
     return "\n\n".join(parts)
 
 
-def _is_assistant(entry: dict[str, Any]) -> bool:
-    if entry.get("type") == "assistant":
+def _has_role(entry: dict[str, Any], role: str) -> bool:
+    if entry.get("type") == role:
         return True
     message = entry.get("message")
-    return isinstance(message, dict) and message.get("role") == "assistant"
+    return isinstance(message, dict) and message.get("role") == role
+
+
+def _is_assistant(entry: dict[str, Any]) -> bool:
+    return _has_role(entry, "assistant")
+
+
+def _last_text_for(transcript_path: str | Path | None, role: str) -> str:
+    """Most recent message from `role` that carried visible text."""
+    if not transcript_path:
+        return ""
+    path = Path(transcript_path).expanduser()
+    if not path.is_file():
+        return ""
+
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or not _has_role(entry, role):
+            continue
+
+        message = entry.get("message")
+        content = message.get("content") if isinstance(message, dict) else entry.get("content")
+        text = _text_from_content(content)
+        if text:
+            return text
+
+    return ""
+
+
+def last_user_text(transcript_path: str | Path | None) -> str:
+    """The message the audited response was replying to.
+
+    The auditor needs it to judge proportionality: a mode's full apparatus is
+    the right answer to a real problem and the wrong answer to "yes".
+    """
+    return _last_text_for(transcript_path, "user")
 
 
 def last_assistant_text(transcript_path: str | Path | None) -> str:

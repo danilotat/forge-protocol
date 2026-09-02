@@ -169,11 +169,19 @@ _OUTPUT_AUDIT_SYSTEM = (
 _OUTPUT_AUDIT_USER_TEMPLATE = """\
 MODE: {mode_name} ({mode_id})
 
-REQUIRED BEHAVIORS (the response must demonstrate all of these):
+REQUIRED BEHAVIORS (the response must demonstrate these):
 {required}
+
+CONDITIONAL BEHAVIORS (these apply only when the exchange calls for them):
+{conditional}
 
 FORBIDDEN BEHAVIORS (the response must do NONE of these):
 {forbidden}
+
+USER'S MESSAGE THAT PROMPTED THE RESPONSE:
+---
+{user_message}
+---
 
 RESPONSE TO AUDIT:
 ---
@@ -182,6 +190,19 @@ RESPONSE TO AUDIT:
 
 Rules for judgment:
 - If a REQUIRED behavior is not clearly demonstrated, include it with kind="required_missing" and quote="".
+- A CONDITIONAL behavior is a violation ONLY if its trigger is present in this
+  exchange and the behavior is still absent. If the trigger did not occur, it is
+  not a violation — say nothing about it. Never flag a behavior as missing while
+  also noting it was inapplicable.
+- A rule that lists techniques or categories names a repertoire to draw from,
+  not a checklist to exhaust in one response. A well-chosen subset satisfies it.
+- Proportionality governs HOW MUCH a response should do, never WHETHER it must
+  comply. A short reply is fine; a short reply that breaks a required rule is
+  still a violation. In particular, a rule about ORDER ("lead with questions",
+  "the human commits first") is violated whenever the order is wrong, however
+  brief or reasonable the response sounds.
+- Conversely, burying a brief message under every available technique is itself
+  a violation where the mode forbids it. Judge both directions.
 - If a FORBIDDEN behavior is present, include it with kind="forbidden" and a verbatim quote.
 - If fully compliant, return compliant=true with an empty violations array.
 """
@@ -377,6 +398,7 @@ def audit_output(
     rules: "OutputRules",
     *,
     runner: Runner | None = None,
+    user_message: str = "",
 ) -> AuditResult | None:
     """Audit a response against a mode's output rules.
 
@@ -394,7 +416,9 @@ def audit_output(
             mode_name=rules.mode_name,
             mode_id=rules.mode,
             required=_fmt_bullets(rules.required_behaviors),
+            conditional=_fmt_bullets(rules.conditional_behaviors),
             forbidden=_fmt_bullets(rules.forbidden_behaviors),
+            user_message=user_message.strip() or "(not available)",
             response=response,
         )
         parsed = _run(runner, _OUTPUT_AUDIT_SYSTEM, user, OUTPUT_AUDIT_SCHEMA)

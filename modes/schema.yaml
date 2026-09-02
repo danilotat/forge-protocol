@@ -39,8 +39,23 @@ properties:
         items:
           type: string
         description: >
-          Natural language rules the LLM MUST follow in this mode.
-          The orchestrator LLM evaluates compliance — no regex.
+          Natural language rules the response MUST demonstrate on every turn
+          in this mode. The auditor evaluates compliance — no regex.
+          Keep this list short: every entry here is demanded of every reply,
+          so anything gated on a trigger or a cadence belongs in `conditional`
+          instead. Over-populating `required` is what turns calibrated
+          friction into a wall of text.
+      conditional:
+        type: array
+        items:
+          type: string
+        description: >
+          Rules that apply only when the exchange triggers them — a cadence
+          ("periodically ..."), or a precondition ("once the user has stated a
+          position", "when the user agrees too quickly", "before providing
+          feedback", "after revision"). The auditor treats one of these as a
+          violation only if its trigger occurred and the behavior is still
+          absent. State the trigger in the rule text so the auditor can see it.
       forbidden:
         type: array
         items:

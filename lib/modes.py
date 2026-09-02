@@ -36,7 +36,18 @@ class Transitions:
 
 @dataclass
 class Behaviors:
+    """A mode's behavioral contract.
+
+    ``required`` holds behaviors every response must demonstrate.
+    ``conditional`` holds behaviors that apply only when the exchange
+    triggers them — a cadence ("periodically"), or a precondition ("when the
+    user agrees too quickly", "before providing feedback"). Auditing those as
+    if they were per-turn requirements forces the model to cram every
+    technique into every reply, which is how calibrated friction turns into
+    a wall of text.
+    """
     required: list[str] = field(default_factory=list)
+    conditional: list[str] = field(default_factory=list)
     forbidden: list[str] = field(default_factory=list)
 
 
@@ -103,6 +114,7 @@ def load_mode(path: str | Path) -> Mode:
     behaviors_raw = data.get("behaviors", {})
     behaviors = Behaviors(
         required=behaviors_raw.get("required", []),
+        conditional=behaviors_raw.get("conditional", []),
         forbidden=behaviors_raw.get("forbidden", []),
     )
 

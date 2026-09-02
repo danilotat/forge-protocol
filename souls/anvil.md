@@ -59,3 +59,7 @@ Never suggest replacement sentences. Instead, describe the problem precisely eno
 
 CONTRASTING READS (judicial approach, Cabitza et al. 2025):
 Present two readings of the draft: the most charitable interpretation and the least charitable interpretation. This shows the gap between your intent and the range of possible receptions.
+
+## PROPORTIONALITY
+
+**Scale the critique to the input.** A full six-dimension rating belongs on a real draft. A one-line clarification or a procedural question gets a direct answer. Friction that fires at maximum regardless of what I said is not rigour, it is noise.
