@@ -77,6 +77,69 @@ def notify(message: str) -> dict[str, Any]:
     return {"systemMessage": message}
 
 
+def _decision_of(output: dict[str, Any] | None) -> str:
+    """One word for what a hook did, for the trace log."""
+    if not output:
+        return "pass"
+    if output.get("decision"):
+        return str(output["decision"])
+    specific = output.get("hookSpecificOutput")
+    if isinstance(specific, dict):
+        if specific.get("permissionDecision"):
+            return str(specific["permissionDecision"])
+        if specific.get("additionalContext"):
+            return "context"
+    if output.get("systemMessage"):
+        return "notify"
+    return "pass"
+
+
+def _trace(
+    handler: Any,
+    payload: dict[str, Any],
+    output: dict[str, Any] | None,
+    error: str | None,
+    started: float,
+) -> None:
+    """Append one line describing this hook run, if tracing is on.
+
+    Hooks are silent by design, and their stderr is invisible from inside a
+    running interactive session — so FORGE_HOOK_TRACE=1 writes a JSONL trail
+    you can `tail -f` from another terminal while you drive Claude Code.
+    Never raises: a broken trace must not break a hook.
+    """
+    import os
+
+    if not os.environ.get("FORGE_HOOK_TRACE"):
+        return
+    try:
+        import json as _json
+        import time
+        from pathlib import Path
+
+        state = os.environ.get("FORGE_STATE_DIR")
+        base = Path(state).expanduser() if state else Path.home() / ".forge-state"
+        target = base / "audit" / "hooks.jsonl"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        record = {
+            "ts": round(time.time(), 3),
+            "hook": getattr(handler, "__name__", "?"),
+            "session_id": payload.get("session_id"),
+            "tool": payload.get("tool_name"),
+            "prompt_chars": len(payload.get("prompt") or "") or None,
+            "stop_hook_active": payload.get("stop_hook_active"),
+            "decision": _decision_of(output),
+            "reason_chars": len(str(output.get("reason", ""))) or None if output else None,
+            "ms": int((time.time() - started) * 1000),
+            "error": error,
+        }
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({k: v for k, v in record.items() if v is not None}) + "\n")
+    except Exception:  # noqa: BLE001 — tracing is never worth a failed hook
+        pass
+
+
 def run(handler: Any) -> int:
     """Drive one hook end to end, and never let it break the session.
 
@@ -84,17 +147,28 @@ def run(handler: Any) -> int:
     guardrail, not a gate on the user getting their work done. Any exception
     is swallowed and the hook exits 0 with no output, so Claude Code proceeds
     exactly as if the plugin were not installed. Set FORGE_HOOK_DEBUG=1 to see
-    the traceback on stderr.
+    the traceback on stderr, or FORGE_HOOK_TRACE=1 for a tailable JSONL trail.
     """
     import os
+    import time
+
+    started = time.time()
+    payload: dict[str, Any] = {}
+    output: dict[str, Any] | None = None
+    error: str | None = None
 
     try:
-        emit(handler(read_payload()))
-    except BaseException:  # noqa: BLE001 — a hook must not take the session down
+        payload = read_payload()
+        output = handler(payload)
+        emit(output)
+    except BaseException as exc:  # noqa: BLE001 — a hook must not take the session down
+        error = type(exc).__name__
         if os.environ.get("FORGE_HOOK_DEBUG"):
             import traceback
 
             traceback.print_exc(file=sys.stderr)
+
+    _trace(handler, payload, output, error, started)
     return 0
 
 

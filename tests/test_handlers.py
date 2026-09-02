@@ -669,3 +669,70 @@ def test_run_survives_a_malformed_payload(monkeypatch, capsys):
 
     assert seen == [{}]
     assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------------------
+# FORGE_HOOK_TRACE — the tailable trail for debugging a live session
+# ---------------------------------------------------------------------------
+
+def _trace_lines(state_dir):
+    import json as _json
+    from pathlib import Path
+
+    path = Path(state_dir) / "audit" / "hooks.jsonl"
+    if not path.exists():
+        return []
+    return [_json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def test_trace_is_off_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path))
+    monkeypatch.delenv("FORGE_HOOK_TRACE", raising=False)
+    hookio.run(handlers.session_start)
+    assert _trace_lines(tmp_path) == []
+
+
+def test_trace_records_the_decision(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("FORGE_HOOK_TRACE", "1")
+    monkeypatch.setenv("FORGE_AUDITOR_ENABLED", "0")
+
+    import io
+
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"session_id": "t1", "cwd": str(tmp_path)})),
+    )
+    hookio.run(handlers.session_start)
+
+    lines = _trace_lines(tmp_path)
+    assert len(lines) == 1
+    assert lines[0]["hook"] == "session_start"
+    assert lines[0]["decision"] == "context"
+    assert lines[0]["session_id"] == "t1"
+    assert "ms" in lines[0]
+
+
+def test_trace_records_a_crash_without_reraising(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("FORGE_HOOK_TRACE", "1")
+
+    def boom(_payload):
+        raise RuntimeError("kaboom")
+
+    boom.__name__ = "boom"
+    assert hookio.run(boom) == 0
+
+    lines = _trace_lines(tmp_path)
+    assert lines[0]["error"] == "RuntimeError"
+    # the message must never reach the trail, same rule as auditor errors
+    assert "kaboom" not in json.dumps(lines[0])
+
+
+def test_trace_failure_never_breaks_the_hook(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_HOOK_TRACE", "1")
+    # point the state dir at a file, so the audit/ mkdir must fail
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    monkeypatch.setenv("FORGE_STATE_DIR", str(blocker))
+    assert hookio.run(handlers.session_start) == 0

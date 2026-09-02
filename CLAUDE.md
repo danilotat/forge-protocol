@@ -89,6 +89,10 @@ guardrail for the ordinary paths, with the output audit as the real backstop. Do
 
 - A hook must never break a session. `hookio.run()` swallows every exception and exits 0 with no output, so Claude
   Code proceeds as if the plugin were absent. `FORGE_HOOK_DEBUG=1` prints the traceback instead.
+- Hook stderr is invisible from inside a running interactive session, so `FORGE_HOOK_TRACE=1` appends a JSONL trail
+  to `$FORGE_STATE_DIR/audit/hooks.jsonl` (`hookio._trace`) for tailing while you drive Claude Code. It records the
+  decision, not the content, and carries only an exception *type* name — same rule as the auditor's `error`. Tracing
+  must never raise: a broken trace is not worth a failed hook.
 - **The `Stop` hook must always honor `stop_hook_active`.** Blocking on Stop re-enters the agent; without the guard the
   session bounces between "revise" and "still not compliant" forever.
 - `PostToolUse` is the wrong event for output validation — it fires after tool calls, never after a response.

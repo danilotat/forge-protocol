@@ -268,6 +268,7 @@ Everything is an environment variable; the plugin manifest has no field for decl
 | `FORGE_MODES_DIR` | `<plugin>/modes` | Override the mode-definition directory |
 | `FORGE_SESSION_ID` | resolved automatically | Pin the Forge session id (otherwise `SessionStart` records it and the CLI reads it back, keyed by working directory) |
 | `FORGE_HOOK_DEBUG` | off | Set to `1` to print hook tracebacks to stderr instead of exiting silently |
+| `FORGE_HOOK_TRACE` | off | Set to `1` to append one JSONL line per hook run to `$FORGE_STATE_DIR/audit/hooks.jsonl` — tailable while a session runs |
 
 One more is set by the plugin, not by you: `FORGE_AUDITOR_CHILD=1` marks the auditor's own `claude -p` child process so that every hook no-ops inside it. It is the second lock on the recursion guard, alongside `--safe-mode`. Don't set it in your shell — it disables the auditor.
 
