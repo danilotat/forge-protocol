@@ -1,11 +1,23 @@
-"""Load and validate mode definitions from YAML files."""
+"""Load and validate mode definitions from YAML files.
+
+YAML is the authored format, but the hook handlers that read these files run
+under whatever ``python3`` is on PATH — and a Claude Code plugin cannot
+declare pip dependencies, so PyYAML may simply not be importable. Every
+``modes/<id>.yaml`` therefore has a committed ``modes/<id>.json`` twin
+(regenerate with ``scripts/build_modes_json.py``), and loading falls back to
+it when PyYAML is missing. Edit the YAML, never the JSON.
+"""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised on hosts without PyYAML
+    yaml = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -52,14 +64,34 @@ class Mode:
         return path.read_text(encoding="utf-8")
 
 
+def _read_mapping(path: Path) -> object:
+    """Parse a mode file, falling back to a precompiled JSON twin."""
+    if path.suffix == ".json":
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    if yaml is not None:
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    twin = path.with_suffix(".json")
+    if twin.exists():
+        with open(twin, encoding="utf-8") as f:
+            return json.load(f)
+
+    raise RuntimeError(
+        f"PyYAML is not installed and no precompiled JSON twin exists for {path}. "
+        "Run scripts/build_modes_json.py, or install pyyaml."
+    )
+
+
 def load_mode(path: str | Path) -> Mode:
-    """Load a single mode definition from a YAML file."""
+    """Load a single mode definition from a YAML (or JSON) file."""
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Mode file not found: {path}")
 
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    data = _read_mapping(path)
 
     if not isinstance(data, dict):
         raise ValueError(f"Invalid mode file (expected mapping): {path}")
@@ -103,15 +135,22 @@ def load_mode(path: str | Path) -> Mode:
 
 
 def load_all_modes(modes_dir: str | Path) -> dict[str, Mode]:
-    """Load all .yaml mode files from a directory. Returns dict keyed by mode id."""
+    """Load every mode definition in a directory. Returns dict keyed by mode id.
+
+    Prefers the authored ``*.yaml`` files. On a host without PyYAML, and only
+    when no YAML is present to fall back from, the precompiled ``*.json``
+    twins are read directly.
+    """
     modes_dir = Path(modes_dir)
     if not modes_dir.is_dir():
         raise FileNotFoundError(f"Modes directory not found: {modes_dir}")
 
+    paths = [p for p in sorted(modes_dir.glob("*.yaml")) if p.name != "schema.yaml"]
+    if not paths:
+        paths = [p for p in sorted(modes_dir.glob("*.json")) if p.name != "schema.json"]
+
     modes: dict[str, Mode] = {}
-    for path in sorted(modes_dir.glob("*.yaml")):
-        if path.name == "schema.yaml":
-            continue
+    for path in paths:
         mode = load_mode(path)
         if mode.id in modes:
             raise ValueError(f"Duplicate mode id '{mode.id}' in {path}")
