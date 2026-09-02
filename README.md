@@ -16,6 +16,10 @@
 
 [Quick Start](#quick-start) | [Why This Exists](#why-this-exists) | [The 4 Modes](#the-4-modes) | [How Enforcement Works](#how-enforcement-works) | [Configuration](#configuration) | [Measure Your Sovereignty](#measure-your-cognitive-sovereignty) | [For Educators](#for-schools--universities) | [Architecture](#architecture)
 
+---
+
+*Based on [**Forge Protocol** by Lorenzo Famiglini](https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent) — the four-mode design, the souls, the canary system and the research grounding are his. This repository is the native Claude Code port, maintained by [danilotat](https://github.com/danilotat). MIT, same as the original — see [Attribution](#attribution).*
+
 </div>
 
 ---
@@ -164,10 +168,12 @@ That's the whole list. There is no `ANTHROPIC_API_KEY`, no `VERTEX_PROJECT`, no 
 
 ### Install
 
+This repository is **private**, so both routes below need a machine whose `git` can already clone it — `/plugin marketplace add` uses the same credentials your shell does, and fails with a clone error otherwise.
+
 From inside Claude Code:
 
 ```
-/plugin marketplace add lorenzofamiglini/The-Forge-Protocol-Agent
+/plugin marketplace add danilotat/forge-protocol
 /plugin install forge-protocol
 ```
 
@@ -181,8 +187,8 @@ Help me think through my thesis on AI in education.
 ### Try it from a clone, without installing
 
 ```bash
-git clone https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent.git
-cd The-Forge-Protocol-Agent
+git clone git@github.com:danilotat/forge-protocol.git
+cd forge-protocol
 claude --plugin-dir .
 ```
 
@@ -570,6 +576,8 @@ Forge Protocol is a native [**Claude Code**](https://claude.com/claude-code) plu
 
 This is the **Claude Code port** of Forge Protocol. The original project was created by **Lorenzo Famiglini** as a plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research), and lives at [**lorenzofamiglini/The-Forge-Protocol-Agent**](https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent). The four-mode design, the mode definitions, the souls, the canary system, and the research grounding are all his; this port replaces the Hermes plugin layer with Claude Code hooks, subagents, and skills, and removes the API-key dependency. Distributed under the same MIT license — see [LICENSE](LICENSE).
 
+This repository (`danilotat/forge-protocol`) is that port, maintained by [**danilotat**](https://github.com/danilotat). It is a private working fork: the upstream project remains the place to look for the canonical version, and any behavioural change here that touches mode semantics is expected to preserve the research mapping documented in [RESEARCH.md](RESEARCH.md).
+
 Thanks also to the Nous Research team, whose Hermes Agent was the foundation the original was built on.
 
 ---
@@ -613,7 +621,7 @@ A: The system prompts (`souls/`, `agents/`) are the starting point, but Forge Pr
 
 **Stop outsourcing your thinking.**
 
-[Get Started](#quick-start) | [Star this repo](https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent)
+[Get Started](#quick-start) | [The original project](https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent)
 
 ---
 
@@ -621,6 +629,6 @@ A: The system prompts (`souls/`, `agents/`) are the starting point, but Forge Pr
 
 Created by **Lorenzo Famiglini, PhD** (lorenzofamiglini@gmail.com). Co-author on the Cabitza lab's work on explainable AI in medical decision support, contrasting-evidence class-activation-maps (CD-MAKE 2022; 2024), *Never tell me the odds* (AI in Medicine 2024), and conformal prediction for ECG interpretation (2025). Forge Protocol is a direct implementation of those collaboration protocols, translated from medical decision support to LLM-augmented knowledge work.
 
-Claude Code port of the original [Hermes Agent plugin](https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent), MIT licensed.
+Claude Code port of the original [Hermes Agent plugin](https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent), MIT licensed — this fork is maintained by **danilotat** ([github.com/danilotat](https://github.com/danilotat)).
 
 </div>
