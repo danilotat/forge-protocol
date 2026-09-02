@@ -10,30 +10,22 @@ from lib import canary
 from lib.canary import CanaryAttempt, CanaryStore, compute_trend, submit_canary
 
 
-class _FakeContent:
-    def __init__(self, text: str):
-        self.text = text
+class _FakeRunner:
+    """Stands in for an ``auditor.Runner``.
 
+    The transport is a ``claude -p`` subprocess with server-side structured
+    output, so a runner hands back an already-parsed JSON object. These
+    fixtures keep their payloads as JSON text and parse on the way out.
+    """
 
-class _FakeMessage:
-    def __init__(self, text: str):
-        self.content = [_FakeContent(text)]
-
-
-class _FakeMessages:
     def __init__(self, texts):
         self.texts = list(texts)
         self.calls = 0
 
-    def create(self, **kwargs):
+    def __call__(self, system: str, user: str, schema: dict) -> dict:
         text = self.texts[min(self.calls, len(self.texts) - 1)]
         self.calls += 1
-        return _FakeMessage(text)
-
-
-class _FakeClient:
-    def __init__(self, texts):
-        self.messages = _FakeMessages(texts)
+        return json.loads(text)
 
 
 def _enable(monkeypatch):
@@ -153,14 +145,14 @@ def test_submit_canary_stores_scored_attempt(tmp_path, monkeypatch):
         "dimensions": {"clarity": 4, "depth": 3, "independence": 5},
         "notes": "strong voice; opening is buried",
     })
-    client = _FakeClient([payload])
+    runner = _FakeRunner([payload])
     store = CanaryStore(state_dir=tmp_path)
 
     attempt, trend = submit_canary(
         "writing_email_decline",
         "Hi team, I cannot make it this week.",
         store=store,
-        client=client,
+        runner=runner,
     )
 
     assert attempt.overall == pytest.approx((4 + 3 + 5) / 3, abs=0.01)
@@ -179,14 +171,16 @@ def test_submit_canary_unknown_prompt_raises(tmp_path):
 
 
 def test_submit_canary_stores_even_when_auditor_disabled(tmp_path, monkeypatch):
-    monkeypatch.delenv("FORGE_AUDITOR_ENABLED", raising=False)
+    # The auditor is on by default now (it needs no API key), so disabling it
+    # takes an explicit falsey value rather than an unset variable.
+    monkeypatch.setenv("FORGE_AUDITOR_ENABLED", "0")
     store = CanaryStore(state_dir=tmp_path)
 
     attempt, trend = submit_canary(
         "writing_email_decline",
         "Hi team,\nI cannot attend.",
         store=store,
-        client=None,
+        runner=None,
     )
 
     # Auditor disabled → attempt stored with overall=0 and error=auditor_disabled
@@ -204,12 +198,12 @@ def test_submit_canary_trend_improves_over_attempts(tmp_path, monkeypatch):
         json.dumps({"dimensions": {"clarity": 3, "depth": 3, "independence": 3}, "notes": "better"}),
         json.dumps({"dimensions": {"clarity": 4, "depth": 4, "independence": 4}, "notes": "strong"}),
     ]
-    client = _FakeClient(payloads)
+    runner = _FakeRunner(payloads)
     store = CanaryStore(state_dir=tmp_path)
 
     for i in range(3):
         time.sleep(0.01)  # ensure distinct timestamps
-        submit_canary("writing_email_decline", f"attempt {i}", store=store, client=client)
+        submit_canary("writing_email_decline", f"attempt {i}", store=store, runner=runner)
 
     trend = compute_trend("writing_email_decline", store=store)
     assert trend.attempts == 3
