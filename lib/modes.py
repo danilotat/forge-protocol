@@ -1,8 +1,8 @@
 """Load and validate mode definitions from YAML files.
 
 YAML is the authored format, but the hook handlers that read these files run
-under whatever ``python3`` is on PATH — and a Claude Code plugin cannot
-declare pip dependencies, so PyYAML may simply not be importable. Every
+under whatever ``python3`` is on PATH — and plugin hooks cannot declare pip
+dependencies, so PyYAML may simply not be importable. Every
 ``modes/<id>.yaml`` therefore has a committed ``modes/<id>.json`` twin
 (regenerate with ``scripts/build_modes_json.py``), and loading falls back to
 it when PyYAML is missing. Edit the YAML, never the JSON.

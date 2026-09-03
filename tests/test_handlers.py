@@ -1,10 +1,10 @@
-"""Tests for the Claude Code hook policy in `forge_cc.handlers`.
+"""Tests for the Codex and Claude Code hook policy in `forge_cc.handlers`.
 
 Replaces the old `test_plugin.py`. Under Hermes the protocol exposed nine
-tools the orchestrator could choose to call; the Claude Code port runs the
+tools the orchestrator could choose to call; the host hooks run the
 same logic from hooks, unconditionally. Each handler is a plain
 `dict -> dict` function, so these tests drive them with payload dicts instead
-of spawning Claude Code.
+of spawning either host.
 
 Every test points `FORGE_STATE_DIR` at a tmp dir and disables the auditor, so
 nothing writes to `~/.forge-state/` and nothing spawns a `claude` subprocess.
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import sys
 
 import pytest
@@ -108,7 +109,7 @@ def test_session_start_injects_mode_and_cli_path(isolated_env):
 def test_session_start_records_the_session_pointer(isolated_env):
     handlers.session_start({"session_id": "s-pointer", "cwd": str(isolated_env)})
 
-    # The `forge` CLI gets no session id from Claude Code, so it reads this
+    # The `forge` CLI gets no session id from the host, so it reads this
     # pointer back. Both the cwd-keyed entry and the _last fallback must work.
     assert paths.get_current_session(str(isolated_env)) == "s-pointer"
     assert paths.get_current_session() == "s-pointer"
@@ -351,6 +352,19 @@ def test_write_tools_are_allowed_in_executor_mode(isolated_env, tool):
     assert handlers.pre_tool_use({"session_id": "s-allow", "tool_name": tool}) == {}
 
 
+def test_codex_apply_patch_is_denied_in_thinking_modes(isolated_env):
+    _session("s-codex-patch", "forge")
+
+    out = handlers.pre_tool_use({
+        "session_id": "s-codex-patch",
+        "tool_name": "apply_patch",
+        "tool_input": {"command": "*** Begin Patch"},
+    })
+
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "apply_patch" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
 @pytest.mark.parametrize("mode", THINKING_MODES + ["executor"])
 def test_read_is_never_blocked(isolated_env, mode):
     session_id = f"s-read-{mode}"
@@ -481,6 +495,21 @@ def test_stop_blocks_and_logs_when_the_audit_finds_violations(isolated_env, monk
     assert len(violations) == 2
     assert {v.violation_type for v in violations} == {"output"}
     assert violations[0].mode == "forge"
+
+
+def test_stop_prefers_codex_last_assistant_message(isolated_env, monkeypatch):
+    monkeypatch.setenv("FORGE_OUTPUT_BLOCK", "1")
+    calls = _fake_output_audit(monkeypatch, _VIOLATION_AUDIT)
+    _session("s-stop-codex", "forge")
+
+    out = handlers.stop({
+        "session_id": "s-stop-codex",
+        "last_assistant_message": "Codex response",
+        "transcript_path": "/unstable/codex/transcript.jsonl",
+    })
+
+    assert out["decision"] == "block"
+    assert calls[0][0] == "Codex response"
 
 
 def test_stop_can_warn_instead_of_blocking(isolated_env, monkeypatch):
@@ -858,7 +887,7 @@ def test_stop_returns_immediately_and_spawns_a_worker(tmp_path, monkeypatch):
     monkeypatch.setenv("FORGE_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("FORGE_OUTPUT_BLOCK", raising=False)
     monkeypatch.setenv("FORGE_AUDITOR_ENABLED", "1")
-    monkeypatch.setenv("FORGE_AUDITOR_CMD", "/bin/true")  # resolvable, never used
+    monkeypatch.setenv("FORGE_AUDITOR_CMD", shutil.which("true") or "true")
 
     spawned = {}
     monkeypatch.setattr(

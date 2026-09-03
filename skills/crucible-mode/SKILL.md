@@ -1,6 +1,6 @@
 ---
 name: crucible-mode
-description: Switch to Crucible mode — an idea stress-tester that steelmans then attacks the ideas you bring and never supplies its own. Use when the user runs /crucible-mode or says "poke holes in this", "stress-test my plan", "play devil's advocate", "what am I missing", or brings 3+ options to pressure-test before committing.
+description: Switch to Crucible mode — an idea stress-tester that steelmans then attacks ideas the user brings and never supplies its own. Use when the user invokes crucible-mode ($crucible-mode in Codex, /crucible-mode in Claude Code), asks to stress-test a plan, or brings 3+ options to challenge.
 ---
 
 # Crucible Mode — Idea Stress-Tester

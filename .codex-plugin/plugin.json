@@ -1,0 +1,31 @@
+{
+  "name": "forge-protocol",
+  "version": "0.3.0",
+  "description": "Anti-deskilling framework with four interaction modes: Forge, Anvil, Crucible, and Executor.",
+  "author": {
+    "name": "Lorenzo Famiglini",
+    "email": "lorenzofamiglini@gmail.com",
+    "url": "https://github.com/lorenzofamiglini"
+  },
+  "homepage": "https://github.com/danilotat/forge-protocol",
+  "repository": "https://github.com/danilotat/forge-protocol",
+  "license": "MIT",
+  "keywords": [
+    "anti-deskilling",
+    "metacognition",
+    "socratic",
+    "thinking"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Forge Protocol",
+    "shortDescription": "Keep human judgment in the loop.",
+    "longDescription": "Four interaction modes that add deliberate friction when a task should strengthen, rather than replace, human thinking.",
+    "developerName": "Forge Protocol contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive"
+    ],
+    "defaultPrompt": "Help me choose the right Forge Protocol mode."
+  }
+}

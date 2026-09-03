@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compile modes/*.yaml into committed modes/*.json twins.
 
-The hook handlers run under the system ``python3``, and a Claude Code plugin
-has no way to declare pip dependencies — so PyYAML may be missing on a user's
+The hook handlers run under the system ``python3``, and plugin hooks have no
+way to declare pip dependencies — so PyYAML may be missing on a user's
 machine. The JSON twins are what ``lib/modes.py`` falls back to.
 
 YAML stays the authored format. Run this after editing any mode file:

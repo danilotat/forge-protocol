@@ -1,6 +1,6 @@
 """Hook stdin/stdout plumbing and output builders.
 
-Claude Code invokes a hook as a shell command, hands it a JSON payload on
+The host invokes a hook as a shell command, hands it a JSON payload on
 stdin, and reads a JSON object back from stdout. The helpers here build the
 exact output shapes for the events this plugin uses, so the handlers stay
 about policy rather than wire format.
@@ -105,7 +105,7 @@ def _trace(
 
     Hooks are silent by design, and their stderr is invisible from inside a
     running interactive session — so FORGE_HOOK_TRACE=1 writes a JSONL trail
-    you can `tail -f` from another terminal while you drive Claude Code.
+    you can `tail -f` from another terminal while you drive the host.
     Never raises: a broken trace must not break a hook.
     """
     import os
@@ -145,7 +145,7 @@ def run(handler: Any) -> int:
 
     A crashed hook is worse than a skipped one: the Forge Protocol is a
     guardrail, not a gate on the user getting their work done. Any exception
-    is swallowed and the hook exits 0 with no output, so Claude Code proceeds
+    is swallowed and the hook exits 0 with no output, so the host proceeds
     exactly as if the plugin were not installed. Set FORGE_HOOK_DEBUG=1 to see
     the traceback on stderr, or FORGE_HOOK_TRACE=1 for a tailable JSONL trail.
     """

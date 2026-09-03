@@ -2,10 +2,10 @@
 """End-to-end check that the mode boundaries are actually enforced.
 
 The unit tests call the handler functions directly. This script goes through
-the real wire instead: it spawns the hook shims as subprocesses the way Claude
-Code does, feeds them JSON on stdin, and asserts on what comes back on stdout.
-That is the only way to catch a broken shim, a bad sys.path bootstrap, or a
-hooks.json path that does not resolve.
+the real wire instead: it spawns the hook dispatcher as a subprocess, feeds it
+JSON on stdin, and asserts on what comes back on stdout. That is the only way
+to catch a broken entry point, a bad sys.path bootstrap, or a hooks.json path
+that does not resolve.
 
     python3 scripts/verify_enforcement.py          # offline, uses a fake auditor
     python3 scripts/verify_enforcement.py --live   # also makes one real audit call
@@ -26,7 +26,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-HOOKS = REPO / "hooks-handlers"
+HOOK = REPO / "hooks" / "dispatch.py"
 FORGE = REPO / "bin" / "forge"
 
 _passed = 0
@@ -45,10 +45,10 @@ def check(name: str, condition: bool, detail: str = "") -> None:
         print(f"  FAIL {name}" + (f"\n       {detail}" if detail else ""))
 
 
-def hook(event_script: str, payload: dict, env: dict | None = None) -> dict:
-    """Run a hook shim exactly as Claude Code would and parse its output."""
+def hook(event: str, payload: dict, env: dict | None = None) -> dict:
+    """Run a hook event through the packaged dispatcher and parse its output."""
     proc = subprocess.run(
-        [sys.executable, str(HOOKS / event_script)],
+        [sys.executable, str(HOOK), event],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
@@ -57,7 +57,7 @@ def hook(event_script: str, payload: dict, env: dict | None = None) -> dict:
     )
     if proc.returncode != 0:
         raise AssertionError(
-            f"{event_script} exited {proc.returncode}: {proc.stderr[:400]}"
+            f"{event} exited {proc.returncode}: {proc.stderr[:400]}"
         )
     out = proc.stdout.strip()
     return json.loads(out) if out else {}
@@ -69,7 +69,7 @@ def set_mode(mode: str) -> dict:
     Not `--force`, which now requires a TTY, and not a bare `set-mode`, which
     is refused when it would relax a thinking mode without user consent.
     """
-    hook("user-prompt-submit.py", {"session_id": SID, "cwd": CWD, "prompt": f"/{mode}-mode"})
+    hook("user-prompt-submit", {"session_id": SID, "cwd": CWD, "prompt": f"/{mode}-mode"})
     return forge("state")
 
 
@@ -182,7 +182,7 @@ def main() -> int:
     )
 
     print("\nSessionStart")
-    out = hook("session-start.py", {**payload, "source": "startup"})
+    out = hook("session-start", {**payload, "source": "startup"})
     context = out.get("hookSpecificOutput", {}).get("additionalContext", "")
     check("injects context", bool(context))
     check("names the active mode", "Executor Mode" in context)
@@ -197,22 +197,22 @@ def main() -> int:
     for mode in ("forge", "anvil", "crucible"):
         set_mode(mode)
         for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
-            out = hook("pre-tool-use.py", {**payload, "tool_name": tool, "tool_input": {}})
+            out = hook("pre-tool-use", {**payload, "tool_name": tool, "tool_input": {}})
             decision = out.get("hookSpecificOutput", {}).get("permissionDecision")
             check(f"{mode}: {tool} denied", decision == "deny", f"got {decision!r}")
         for tool in ("Read", "Grep", "Bash"):
-            out = hook("pre-tool-use.py", {**payload, "tool_name": tool, "tool_input": {}})
+            out = hook("pre-tool-use", {**payload, "tool_name": tool, "tool_input": {}})
             check(f"{mode}: {tool} allowed", out == {}, f"got {out!r}")
 
     set_mode("executor")
     for tool in ("Write", "Edit"):
-        out = hook("pre-tool-use.py", {**payload, "tool_name": tool, "tool_input": {}})
+        out = hook("pre-tool-use", {**payload, "tool_name": tool, "tool_input": {}})
         check(f"executor: {tool} allowed", out == {}, f"got {out!r}")
 
     print("\nviolation logging")
     set_mode("forge")
     before = forge("state").get("violation_count", 0)
-    hook("pre-tool-use.py", {**payload, "tool_name": "Write", "tool_input": {}})
+    hook("pre-tool-use", {**payload, "tool_name": "Write", "tool_input": {}})
     check(
         "denial is recorded in session state",
         forge("state").get("violation_count", 0) == before + 1,
@@ -221,7 +221,7 @@ def main() -> int:
     print("\nUserPromptSubmit")
     set_mode("forge")
     start = forge("state")["message_count"]
-    hook("user-prompt-submit.py", {**payload, "prompt": "my position is X because Y"})
+    hook("user-prompt-submit", {**payload, "prompt": "my position is X because Y"})
     check(
         "counts exactly one message per turn",
         forge("state")["message_count"] == start + 1,
@@ -229,14 +229,14 @@ def main() -> int:
 
     fired = []
     for _ in range(6):
-        out = hook("user-prompt-submit.py", {**payload, "prompt": "my reasoning is X"})
+        out = hook("user-prompt-submit", {**payload, "prompt": "my reasoning is X"})
         ctx = out.get("hookSpecificOutput", {}).get("additionalContext", "")
         fired.append("checkpoint is due" in ctx)
     check("metacognitive checkpoint fires on interval", any(fired))
     check("checkpoint does not fire every turn", not all(fired))
 
     set_mode("executor")
-    out = hook("user-prompt-submit.py", {**payload, "prompt": "reformat this csv"})
+    out = hook("user-prompt-submit", {**payload, "prompt": "reformat this csv"})
     check("executor mode adds zero friction", out == {}, f"got {out!r}")
 
     print("\nmode-relaxation consent gate")
@@ -248,7 +248,7 @@ def main() -> int:
         f"got {denied!r}",
     )
     check("mode is unchanged after the refusal", forge("state")["current_mode"] == "forge")
-    hook("user-prompt-submit.py", {**payload, "prompt": "/executor-mode"})
+    hook("user-prompt-submit", {**payload, "prompt": "/executor-mode"})
     allowed = forge("set-mode", "executor")
     check(
         "the user's own /executor-mode is honored",
@@ -268,11 +268,11 @@ def main() -> int:
     }
     stop_payload = {**payload, "transcript_path": str(transcript), "stop_hook_active": False}
 
-    out = hook("stop.py", stop_payload, env=audit_env)
+    out = hook("stop", stop_payload, env=audit_env)
     check("blocks a non-compliant response", out.get("decision") == "block", f"got {out!r}")
     check("block reason lists the violation", "oracular" in out.get("reason", ""))
 
-    out = hook("stop.py", {**stop_payload, "stop_hook_active": True}, env=audit_env)
+    out = hook("stop", {**stop_payload, "stop_hook_active": True}, env=audit_env)
     check("honors stop_hook_active (no infinite loop)", out == {}, f"got {out!r}")
 
     argv = json.loads((tmp / "argv.json").read_text())
@@ -284,7 +284,7 @@ def main() -> int:
     # the user's OAuth credentials, defeating the entire point of this port.
     check("auditor never passes --bare", "--bare" not in argv)
 
-    out = hook("stop.py", stop_payload, env={**audit_env, "FORGE_AUDITOR_CHILD": "1"})
+    out = hook("stop", stop_payload, env={**audit_env, "FORGE_AUDITOR_CHILD": "1"})
     check("recursion guard suppresses the hook", out == {}, f"got {out!r}")
 
     print("\ndefault output path (one answer, correction carried forward)")
@@ -292,7 +292,7 @@ def main() -> int:
         "FORGE_AUDITOR_ENABLED": "1",
         "FORGE_AUDITOR_CMD": str(fake_auditor(tmp, violations=True)),
     }
-    out = hook("stop.py", stop_payload, env=notify_env)
+    out = hook("stop", stop_payload, env=notify_env)
     check(
         "default does not send the turn back",
         "decision" not in out,
@@ -302,10 +302,10 @@ def main() -> int:
     import time as _time
 
     _time.sleep(2)
-    nxt = hook("user-prompt-submit.py", {**payload, "prompt": "carry on"}, env=notify_env)
+    nxt = hook("user-prompt-submit", {**payload, "prompt": "carry on"}, env=notify_env)
     carried = nxt.get("hookSpecificOutput", {}).get("additionalContext", "")
     check("the finding is delivered on the next turn", "flagged your PREVIOUS" in carried)
-    nxt2 = hook("user-prompt-submit.py", {**payload, "prompt": "again"}, env=notify_env)
+    nxt2 = hook("user-prompt-submit", {**payload, "prompt": "again"}, env=notify_env)
     check(
         "and is not repeated every turn",
         "flagged your PREVIOUS" not in nxt2.get("hookSpecificOutput", {}).get("additionalContext", ""),
@@ -315,26 +315,26 @@ def main() -> int:
         "FORGE_AUDITOR_ENABLED": "1",
         "FORGE_AUDITOR_CMD": str(fake_auditor(tmp, violations=False)),
     }
-    out = hook("stop.py", stop_payload, env=compliant_env)
+    out = hook("stop", stop_payload, env=compliant_env)
     check("compliant response passes through", out == {}, f"got {out!r}")
 
     broken = tmp / "broken-claude"
     broken.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
     broken.chmod(0o755)
     out = hook(
-        "stop.py",
+        "stop",
         stop_payload,
         env={"FORGE_AUDITOR_ENABLED": "1", "FORGE_AUDITOR_CMD": str(broken)},
     )
     check("a failing auditor never blocks the response", out == {}, f"got {out!r}")
 
     set_mode("executor")
-    out = hook("stop.py", stop_payload, env=audit_env)
+    out = hook("stop", stop_payload, env=audit_env)
     check("executor mode is never audited", out == {}, f"got {out!r}")
 
     print("\nSessionEnd")
     set_mode("forge")
-    out = hook("session-end.py", {**payload, "reason": "clear"})
+    out = hook("session-end", {**payload, "reason": "clear"})
     check("surfaces the closing reflection prompt", "systemMessage" in out, f"got {out!r}")
 
     if args.live:
@@ -347,7 +347,7 @@ def main() -> int:
                 transcript,
                 "Here's what I'd suggest: split the monolith into three services now.",
             )
-            out = hook("stop.py", stop_payload, env={"FORGE_AUDITOR_ENABLED": "1"})
+            out = hook("stop", stop_payload, env={"FORGE_AUDITOR_ENABLED": "1"})
             check(
                 "real auditor blocks an oracular response",
                 out.get("decision") == "block",

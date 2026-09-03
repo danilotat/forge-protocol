@@ -1,6 +1,6 @@
 {
   "name": "forge-protocol",
-  "description": "The Forge Protocol — an anti-deskilling framework for Claude Code, grounded in the Cabitza lab's human-AI collaboration research.",
+  "description": "The Forge Protocol — an anti-deskilling plugin for Codex and Claude Code, grounded in human-AI collaboration research.",
   "owner": {
     "name": "Lorenzo Famiglini",
     "email": "lorenzofamiglini@gmail.com"
@@ -9,7 +9,7 @@
     {
       "name": "forge-protocol",
       "source": "./",
-      "description": "Four interaction modes (Forge, Anvil, Crucible, Executor) that keep you doing the thinking. Mode-aware write-locking, an independent adversarial auditor, metacognitive checkpoints, and canary skill tracking. No API key required."
+      "description": "Four interaction modes that keep human judgment in the loop, with write-locking, checkpoints and optional independent auditing."
     }
   ]
 }

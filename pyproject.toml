@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "forge-protocol"
-version = "0.2.0"
-description = "The AI that refuses to think for you. Anti-deskilling framework that protects human cognitive skills."
+version = "0.3.0"
+description = "Dual-host anti-deskilling plugin for Codex and Claude Code."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = [
     "ai", "cognitive-science", "deskilling", "education",
-    "socratic-method", "llm", "claude-code", "anti-deskilling",
+    "socratic-method", "llm", "codex", "claude-code", "anti-deskilling",
     "thinking", "metacognition",
 ]
 classifiers = [
@@ -22,7 +22,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,8 +31,8 @@ classifiers = [
 ]
 # No runtime dependencies. The adversarial auditor shells out to the `claude`
 # CLI (no API key, no SDK), and lib/modes.py falls back to the committed
-# modes/*.json twins on hosts without PyYAML — which is the norm for the hook
-# handlers, since a Claude Code plugin cannot declare pip dependencies.
+# modes/*.json twins on hosts without PyYAML — which is the norm for hook
+# handlers because plugins cannot declare their interpreter dependencies.
 dependencies = []
 
 [project.optional-dependencies]
@@ -46,7 +45,8 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent"
+Repository = "https://github.com/danilotat/forge-protocol"
+Upstream = "https://github.com/lorenzofamiglini/The-Forge-Protocol-Agent"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

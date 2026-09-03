@@ -47,9 +47,12 @@ def _run(capsys, *argv: str) -> tuple[int, dict]:
         ("/anvil-mode please", "anvil"),
         ("  /crucible-mode", "crucible"),
         ("/EXECUTOR-MODE", "executor"),
+        ("$forge-mode", "forge"),
+        ("$forge-protocol:anvil-mode", "anvil"),
         # a mention is not an invocation — see test_mentioning_a_mode_does_not_switch
         ("why did you suggest /executor-mode?", None),
         ("switch me to /crucible-mode", None),
+        ("why did you suggest $executor-mode?", None),
         ("write a file for me", None),
         ("use executor mode", None),  # prose is not the slash command
         ("", None),

@@ -1,7 +1,7 @@
-"""Path, state-dir, and session-pointer resolution for the Claude Code port.
+"""Path, state-dir, and session-pointer resolution for the host adapters.
 
 This is the only place that knows where things live. `lib/` stays a pure
-portable core with no knowledge of Claude Code; everything host-specific
+portable core with no knowledge of Codex or Claude Code; everything host-specific
 lands here.
 """
 
@@ -14,9 +14,10 @@ import time
 from pathlib import Path
 
 #: Plugin root: the directory containing forge_cc/, modes/, souls/, bin/.
-#: CLAUDE_PLUGIN_ROOT is set by Claude Code inside hook commands; the
-#: filesystem walk covers direct CLI use, tests, and pip-installed layouts.
-_ENV_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT")
+#: Codex sets PLUGIN_ROOT and also exposes CLAUDE_PLUGIN_ROOT for compatibility;
+#: Claude Code sets CLAUDE_PLUGIN_ROOT. The filesystem walk covers direct CLI
+#: use, tests, and pip-installed layouts.
+_ENV_ROOT = os.environ.get("PLUGIN_ROOT") or os.environ.get("CLAUDE_PLUGIN_ROOT")
 if _ENV_ROOT and (Path(_ENV_ROOT).expanduser() / "modes").is_dir():
     PLUGIN_ROOT = Path(_ENV_ROOT).expanduser().resolve()
 else:
