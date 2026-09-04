@@ -102,6 +102,7 @@ def test_session_start_injects_mode_and_cli_path(isolated_env):
     assert "Forge Protocol active" in context
     assert "Executor Mode" in context        # default mode's display name
     assert "`executor`" in context
+    assert "Mode source: **default**" in context
     assert "FORGE_CLI:" in context
     assert str(paths.cli_path()) in context
 
