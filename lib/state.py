@@ -41,6 +41,7 @@ class AuditStatus:
 class Session:
     session_id: str
     current_mode: str = "executor"
+    mode_source: str = "default"
     mode_history: list[ModeEntry] = field(default_factory=list)
     message_count: int = 0
     last_checkpoint_at: int = 0
@@ -82,7 +83,12 @@ class StateManager:
             raise ValueError(f"session_id escapes state directory: {session_id!r}")
         return path
 
-    def create_session(self, session_id: str | None = None, initial_mode: str = "executor") -> Session:
+    def create_session(
+        self,
+        session_id: str | None = None,
+        initial_mode: str = "executor",
+        mode_source: str = "default",
+    ) -> Session:
         """Create a new session with a unique ID."""
         self._ensure_dirs()
         sid = session_id or str(uuid.uuid4())
@@ -90,6 +96,7 @@ class StateManager:
         session = Session(
             session_id=sid,
             current_mode=initial_mode,
+            mode_source=mode_source,
             mode_history=[ModeEntry(mode=initial_mode, entered_at=now)],
             created_at=now,
             updated_at=now,
@@ -119,11 +126,15 @@ class StateManager:
             raise ValueError(f"Session not found: {session_id}")
         return session
 
-    def switch_mode(self, session_id: str, new_mode: str) -> Session:
-        """Switch the current mode for a session."""
+    def switch_mode(self, session_id: str, new_mode: str, source: str = "user") -> Session:
+        """Switch the current mode and record who selected it."""
         session = self._require_session(session_id)
 
         if session.current_mode == new_mode:
+            if session.mode_source != source:
+                session.mode_source = source
+                session.updated_at = time.time()
+                self._write_session(session)
             return session
 
         now = time.time()
@@ -136,6 +147,7 @@ class StateManager:
 
         session.mode_history.append(ModeEntry(mode=new_mode, entered_at=now))
         session.current_mode = new_mode
+        session.mode_source = source
         session.last_checkpoint_at = session.message_count
         session.updated_at = now
 
@@ -202,6 +214,7 @@ class StateManager:
         return {
             "session_id": session.session_id,
             "current_mode": session.current_mode,
+            "mode_source": session.mode_source,
             "mode_history": [
                 {
                     "mode": e.mode,
@@ -237,6 +250,9 @@ class StateManager:
         return Session(
             session_id=data["session_id"],
             current_mode=data.get("current_mode", "executor"),
+            # Pre-ownership state may reflect a deliberate selection, so it is
+            # never safe for the orchestrator to override automatically.
+            mode_source=data.get("mode_source", "legacy"),
             mode_history=[
                 ModeEntry(
                     mode=e["mode"],

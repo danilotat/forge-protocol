@@ -172,3 +172,36 @@ def test_routing_is_exempt_from_the_oracular_ban():
     # and the soul side must say the same thing, or generation and audit drift
     soul = (root / "souls" / "forge-orchestrator.md").read_text()
     assert "routing, not answering" in soul
+
+
+def test_orchestrator_requires_route_before_substantive_work():
+    root = Path(__file__).parent.parent
+    # Collapse whitespace: these are phrase contracts, not line-wrap contracts.
+    soul = " ".join((root / "souls" / "forge-orchestrator.md").read_text().lower().split())
+
+    assert "classify the task before answering" in soul
+    assert "select exactly one applicable mode skill" in soul
+    assert "route-mode <mode>" in soul
+    assert "before any substantive work" in soul
+    assert "never emit a warning and then produce" in soul
+    assert "automatic routing must never select executor" in soul
+
+
+@pytest.mark.parametrize("mode", ["forge", "anvil", "crucible"])
+def test_thinking_skills_support_implicit_routing(mode):
+    root = Path(__file__).parent.parent
+    skill = (root / "skills" / f"{mode}-mode" / "SKILL.md").read_text().lower()
+
+    assert f"route-mode {mode} >/dev/null" in skill
+    assert "two activation paths" in skill
+    assert "before substantive work" in skill
+    assert "must not depend" in skill
+
+
+def test_executor_skill_cannot_be_selected_to_relax_friction():
+    root = Path(__file__).parent.parent
+    skill = (root / "skills" / "executor-mode" / "SKILL.md").read_text().lower()
+
+    assert "use only when the user explicitly invokes" in skill
+    assert "semantic matching must never relax" in skill
+    assert "route-mode executor" not in skill

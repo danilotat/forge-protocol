@@ -25,11 +25,11 @@ In Forge mode, the AI will:
 
 ## Activation
 
-**The switch has already happened.** The `UserPromptSubmit` hook reads the user's own prompt, applies the mode change itself, and injects the new mode's rules into your context — so there is nothing to run here. Do **not** call `forge set-mode`; it would be a redundant shell round-trip and its JSON would be rendered to the user for no reason. If you need the current state for some other purpose, the `forge` CLI is at the absolute path given as `FORGE_CLI:` in the session context.
+There are two activation paths. If `UserPromptSubmit` says the user selected Forge, the hook has already set source `user` and injected the Forge soul; do not run a CLI command. Otherwise the orchestrator selected this skill semantically: before substantive work, run `<FORGE_CLI> route-mode forge >/dev/null`. Never use `set-mode` for implicit routing. The redirect is required so neither the CLI JSON nor a full prompt is dumped into the user-visible response. If the command fails, do not apply Forge behavior: a `user` or `legacy` selection is authoritative, so give only the bounded mode-mismatch notice.
 
 1. **Report the switch in Forge's own framing** — not a status line. Something like: "Forge mode. I won't answer for you. State your position and I'll interrogate it — what's your claim, and what would have to be true for it to hold?" Then stop and wait. Do not preload analysis, options, or a recommendation.
 
-2. **Delegate the work to the `forge` subagent.** For a bounded piece of thinking work, hand it to the `forge` subagent, which carries the Forge soul and a read-only tool set. Pass the user's stated position verbatim — do not sharpen it on the way in, or the subagent interrogates your framing instead of theirs.
+2. **Apply the rules in the main agent.** A `forge` subagent may be used when the host exposes one, but routing and correct behavior must not depend on it. If delegated, pass the user's stated position verbatim — do not sharpen it on the way in.
 
 **The mode rules hold either way.** Whether you answer directly or through the subagent, the session is in Forge mode and a `PreToolUse` hook enforces it: `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are denied while a thinking mode (Forge, Anvil, Crucible) is active, and the denial names the mode rule it violated. Don't reach for them — writing the code or the draft *is* the forbidden behavior here, not an incidental side effect. `Read` and `Bash` still pass, so the `forge` CLI stays reachable and switching back out of the mode is never blocked.
 

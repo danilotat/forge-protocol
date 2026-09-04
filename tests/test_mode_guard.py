@@ -430,10 +430,25 @@ def test_the_hook_applies_the_switch_itself(tmp_path, capsys):
 
     _code, state = _run(capsys, "state", "--session-id", "hs1")
     assert state["current_mode"] == "forge"
+    assert state["mode_source"] == "user"
 
     context = out["hookSpecificOutput"]["additionalContext"]
     assert "already applied" in context
     assert "do not run" in context
+    assert "Socratic thinking partner implementing" in context
+
+
+def test_explicit_selection_of_active_executor_claims_ownership(tmp_path, capsys):
+    from forge_cc import handlers
+
+    out = handlers.user_prompt_submit({
+        "session_id": "hs-source", "cwd": str(tmp_path), "prompt": "/executor-mode",
+    })
+
+    _code, state = _run(capsys, "state", "--session-id", "hs-source")
+    assert state["current_mode"] == "executor"
+    assert state["mode_source"] == "user"
+    assert "standard LLM operation" in out["hookSpecificOutput"]["additionalContext"]
 
 
 def test_the_hook_honors_a_user_relaxation(tmp_path, capsys):

@@ -25,11 +25,11 @@ In Anvil mode, the AI will:
 
 ## Activation
 
-**The switch has already happened.** The `UserPromptSubmit` hook reads the user's own prompt, applies the mode change itself, and injects the new mode's rules into your context — so there is nothing to run here. Do **not** call `forge set-mode`; it would be a redundant shell round-trip and its JSON would be rendered to the user for no reason. If you need the current state for some other purpose, the `forge` CLI is at the absolute path given as `FORGE_CLI:` in the session context.
+There are two activation paths. If `UserPromptSubmit` says the user selected Anvil, the hook has already set source `user` and injected the Anvil soul; do not run a CLI command. Otherwise the orchestrator selected this skill semantically: before substantive work, run `<FORGE_CLI> route-mode anvil >/dev/null`. Never use `set-mode` for implicit routing. The redirect is required so neither the CLI JSON nor a full prompt is dumped into the user-visible response. If the command fails, do not apply Anvil behavior: a `user` or `legacy` selection is authoritative, so give only the bounded mode-mismatch notice.
 
 1. **Report the switch in Anvil's own framing** and ask for the raw material: "Anvil mode. Paste the draft — all of it, as you wrote it. I'll rate it and quote what's weakest; I won't rewrite a line of it." **The order is the mechanism**: the user commits their full draft first, the critique comes second. Do not offer suggestions, an outline, or a sample paragraph before the draft arrives — that inverts the protocol into the anchoring pattern it exists to prevent.
 
-3. **Delegate the critique to the `anvil` subagent** once the draft is in hand. Pass the draft verbatim; the subagent carries the Anvil soul and a read-only tool set. Summarizing or tidying the draft on the way in means the critique lands on your paraphrase, not on their work.
+2. **Apply the critique rules in the main agent** once the draft is in hand. An `anvil` subagent may be used when the host exposes one, but correct critique must not depend on it. If delegated, pass the draft verbatim; summarizing or tidying it changes the work being critiqued.
 
 **The mode rules hold either way.** Whether you critique directly or through the subagent, the session is in Anvil mode and a `PreToolUse` hook enforces it: `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are denied while a thinking mode (Forge, Anvil, Crucible) is active, and the denial names the mode rule it violated. Don't reach for them to apply a fix to the user's file — editing their draft *is* the forbidden behavior here. `Read` and `Bash` still pass, so you can read the file the draft came from and the `forge` CLI stays reachable.
 

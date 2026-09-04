@@ -17,7 +17,7 @@ Run the `forge` CLI at the absolute path given as `FORGE_CLI:` in the Forge Prot
 
 One read-only call covers the whole dashboard. Render it as a short summary, not raw JSON:
 
-- **Current mode** — `mode_name` and `mode_description` (Forge, Anvil, Crucible, or Executor)
+- **Current mode** — `mode_name` and `mode_description` (Forge, Anvil, Crucible, or Executor), plus `mode_source` so the user can see whether it is the initial `default`, an explicit `user` choice, an automatic `orchestrator` route, or conservative `legacy` state
 - **Message count** in this session — `message_count`
 - **Violations** — `violation_count`, plus `recent_violations` (the last 5, each with `rule_id`, `mode`, `type`) if the count is non-zero. Name the rules that were actually broken; a bare number tells the user nothing they can act on.
 - **Mode history** — `mode_history`, each entry a mode and how many messages were spent in it
