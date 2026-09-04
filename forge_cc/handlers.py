@@ -11,7 +11,7 @@ Mapping from the old plugin tools to hook events:
     forge_validate_input  -> UserPromptSubmit
     forge_validate_output -> Stop / SubagentStop
     forge_checkpoint      -> UserPromptSubmit
-    forge_set_mode        -> `forge set-mode` (driven by the /*-mode skills)
+    forge_set_mode        -> explicit hook switches + constrained `forge route-mode`
     (new)                 -> PreToolUse write-lock
 
 Every handler is a plain function from payload dict to output dict, so the
@@ -354,6 +354,7 @@ def session_start(payload: dict[str, Any]) -> dict[str, Any]:
         "",
         f"Active mode: **{mode.name if mode else session.current_mode}** "
         f"(`{session.current_mode}`)",
+        f"Mode source: **{session.mode_source}**",
         f"Messages this session: {session.message_count}",
         f"FORGE_CLI: {cli_path()}",
         "",
@@ -411,24 +412,23 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
     # get it wrong), and the skill stops needing a Bash round-trip whose JSON
     # output was rendered in full to the user.
     requested = requested_mode(payload.get("prompt") or "")
-    switched_to = ""
+    activated_mode = ""
     if requested:
         # Still recorded, so a `forge set-mode` from any other caller sees the
         # user's consent — see forge_cc.paths.set_mode_request.
         set_mode_request(requested, payload.get("cwd"))
 
-        if requested != session.current_mode:
-            modes = load_modes()
-            current = modes.get(session.current_mode)
-            allowed = not (
-                current
-                and current.transitions.allowed_to
-                and requested not in current.transitions.allowed_to
-            )
-            if allowed and requested in modes:
-                session = sm.switch_mode(session.session_id, requested)
-                mode = modes[requested]
-                switched_to = requested
+        modes = load_modes()
+        current = modes.get(session.current_mode)
+        allowed = requested == session.current_mode or not (
+            current
+            and current.transitions.allowed_to
+            and requested not in current.transitions.allowed_to
+        )
+        if allowed and requested in modes:
+            session = sm.switch_mode(session.session_id, requested, source="user")
+            mode = modes[requested]
+            activated_mode = requested
 
     # A new user turn gets a fresh revision budget for the output audit.
     reset_audit_blocks(payload.get("cwd"))
@@ -440,21 +440,30 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any]:
 
     outputs: list[dict[str, Any]] = []
 
-    if switched_to:
-        target = load_modes().get(switched_to)
-        locked = switched_to in THINKING_MODES
+    if activated_mode:
+        target = load_modes().get(activated_mode)
+        locked = activated_mode in THINKING_MODES
+        try:
+            target_soul = target.load_system_prompt(PLUGIN_ROOT).strip() if target else ""
+        except (OSError, ValueError):
+            target_soul = ""
+        context = (
+            f"Forge Protocol — the user switched to or reaffirmed **{target.name if target else activated_mode}** "
+            f"(`{activated_mode}`). The selection is already applied with source `user`; "
+            "do not run `forge set-mode` or `forge route-mode`."
+            + (
+                f"\n\nWrite tools ({', '.join(sorted(WRITE_TOOLS))}) are now denied, "
+                "and an independent auditor reviews your responses."
+                if locked
+                else "\n\nNo friction applies in this mode."
+            )
+        )
+        if target_soul:
+            context += f"\n\n---\n\n{target_soul}"
         outputs.append(
             hookio.additional_context(
                 "UserPromptSubmit",
-                f"Forge Protocol — the user switched to **{target.name if target else switched_to}** "
-                f"(`{switched_to}`). The switch is already applied; do not run "
-                "`forge set-mode`."
-                + (
-                    f"\n\nWrite tools ({', '.join(sorted(WRITE_TOOLS))}) are now denied, "
-                    "and an independent auditor reviews your responses."
-                    if locked
-                    else "\n\nNo friction applies in this mode."
-                ),
+                context,
             )
         )
 
