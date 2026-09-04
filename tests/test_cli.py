@@ -4,7 +4,7 @@ Plugin skills are prompts, not code — they change protocol state by
 shelling out to this CLI and reading the JSON it prints. So the contract under
 test is twofold: the JSON shape each subcommand emits, and the read/write
 separation. `state`, `rules`, `checkpoint`, `report` and `canary trend` are
-read-only; only `set-mode`, `canary submit`, `report --record` and
+read-only; only `set-mode`, `route-mode`, `canary submit`, `report --record` and
 `audit-done` may mutate anything. The status skill opens a dashboard on every
 turn, and a dashboard that silently consumed a pending checkpoint or cleared
 an overdue audit reminder would quietly defeat the protocol.
@@ -125,6 +125,7 @@ def test_state_creates_and_reports_a_session(capsys):
     assert code == 0
     assert out["session_id"] == "s1"
     assert out["current_mode"] == "executor"
+    assert out["mode_source"] == "default"
     assert out["mode_name"] == "Executor Mode"
     assert out["message_count"] == 0
     assert out["violation_count"] == 0
@@ -222,6 +223,118 @@ def test_set_mode_is_a_no_op_when_already_in_that_mode(capsys):
     assert "Already in anvil mode." in out["message"]
     # No second mode_history entry, no fresh timestamps.
     assert _session_file("sm4") == before
+
+
+def test_set_mode_of_default_executor_records_explicit_user_choice(capsys):
+    code, out = _run(capsys, "set-mode", "executor", "--session-id", "sm-source")
+
+    assert code == 0
+    assert out["changed"] is False
+    assert out["source_changed"] is True
+    assert out["source"] == "user"
+    assert _session_file("sm-source")["mode_source"] == "user"
+
+
+# ---------------------------------------------------------------------------
+# route-mode
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("target", ["forge", "anvil", "crucible"])
+def test_route_mode_enters_each_thinking_mode(capsys, target):
+    code, out = _run(capsys, "route-mode", target, "--session-id", f"route-{target}")
+
+    assert code == 0
+    assert out["previous"] == "executor"
+    assert out["current"] == target
+    assert out["source"] == "orchestrator"
+    assert _session_file(f"route-{target}")["mode_source"] == "orchestrator"
+
+
+def test_route_mode_allows_orchestrator_thinking_to_thinking(capsys):
+    _run(capsys, "route-mode", "forge", "--session-id", "route-lateral")
+
+    code, out = _run(capsys, "route-mode", "anvil", "--session-id", "route-lateral")
+
+    assert code == 0
+    assert out["previous"] == "forge"
+    assert out["current"] == "anvil"
+    assert out["source"] == "orchestrator"
+
+
+def test_route_mode_reaffirms_active_orchestrator_mode(capsys):
+    _run(capsys, "route-mode", "forge", "--session-id", "route-same")
+
+    code, out = _run(capsys, "route-mode", "forge", "--session-id", "route-same")
+
+    assert code == 0
+    assert out["changed"] is False
+    assert out["current"] == "forge"
+    assert out["source"] == "orchestrator"
+
+
+def test_route_mode_refuses_executor(capsys):
+    code, out = _run(capsys, "route-mode", "executor", "--session-id", "route-exec")
+
+    assert code == 1
+    assert "not allowed" in out["error"]
+    assert StateManager().get_session("route-exec") is None
+
+
+def test_route_mode_refuses_user_owned_selection(capsys):
+    _run(capsys, "set-mode", "executor", "--session-id", "route-user")
+
+    code, out = _run(capsys, "route-mode", "forge", "--session-id", "route-user")
+
+    assert code == 1
+    assert "user mode selection" in out["error"]
+    assert _session_file("route-user")["current_mode"] == "executor"
+
+
+def test_route_mode_refuses_legacy_selection(capsys):
+    sm = StateManager()
+    sm.create_session("route-legacy")
+    path = paths.state_dir() / "sessions" / "route-legacy.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("mode_source")
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    code, out = _run(capsys, "route-mode", "forge", "--session-id", "route-legacy")
+
+    assert code == 1
+    assert "legacy mode selection" in out["error"]
+    assert _session_file("route-legacy")["current_mode"] == "executor"
+
+
+def test_route_mode_honors_transition_constraints(capsys, tmp_path, monkeypatch):
+    modes_dir = tmp_path / "route-modes"
+    modes_dir.mkdir()
+    souls_dir = tmp_path / "souls"
+    souls_dir.mkdir(exist_ok=True)
+    (souls_dir / "x.md").write_text("x", encoding="utf-8")
+    for mode_id, allowed_to, allowed_from in (
+        ("executor", ["anvil"], []),
+        ("forge", [], ["executor"]),
+    ):
+        (modes_dir / f"{mode_id}.json").write_text(json.dumps({
+            "id": mode_id,
+            "name": mode_id,
+            "description": mode_id,
+            "system_prompt_file": "souls/x.md",
+            "behaviors": {"required": [], "forbidden": []},
+            "input_rules": [],
+            "metacognitive": {"checkpoint_interval": 0, "prompts": []},
+            "transitions": {
+                "confirm_switch": mode_id == "forge",
+                "allowed_to": allowed_to,
+                "allowed_from": allowed_from,
+            },
+        }), encoding="utf-8")
+    monkeypatch.setenv("FORGE_MODES_DIR", str(modes_dir))
+
+    code, out = _run(capsys, "route-mode", "forge", "--session-id", "route-limited")
+
+    assert code == 1
+    assert "does not allow switching to forge" in out["error"]
 
 
 # ---------------------------------------------------------------------------
