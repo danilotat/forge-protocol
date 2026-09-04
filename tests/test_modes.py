@@ -176,7 +176,8 @@ def test_routing_is_exempt_from_the_oracular_ban():
 
 def test_orchestrator_requires_route_before_substantive_work():
     root = Path(__file__).parent.parent
-    soul = (root / "souls" / "forge-orchestrator.md").read_text().lower()
+    # Collapse whitespace: these are phrase contracts, not line-wrap contracts.
+    soul = " ".join((root / "souls" / "forge-orchestrator.md").read_text().lower().split())
 
     assert "classify the task before answering" in soul
     assert "select exactly one applicable mode skill" in soul
