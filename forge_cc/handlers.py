@@ -358,17 +358,17 @@ def session_start(payload: dict[str, Any]) -> dict[str, Any]:
         f"Messages this session: {session.message_count}",
         f"FORGE_CLI: {cli_path()}",
         "",
-        "Switch modes with the forge-mode, anvil-mode, crucible-mode or "
-        "executor-mode skill. Use `$skill-name` in Codex and `/skill-name` in "
-        "Claude Code. forge-status shows state; forge-audit runs a self-audit.",
+        "Mode skills: forge-mode, anvil-mode, crucible-mode, executor-mode "
+        "(`$name` in Codex, `/name` in Claude Code); plus forge-status and "
+        "forge-audit.",
     ]
 
     if session.current_mode in THINKING_MODES:
         lines += [
             "",
-            "Enforcement in this mode is not advisory: a PreToolUse hook denies "
+            "Enforcement here is not advisory: a PreToolUse hook denies "
             f"{', '.join(sorted(WRITE_TOOLS))}, and an independent auditor reviews "
-            "your response when you finish. Do not attempt to write files.",
+            "your response. Do not attempt to write files.",
         ]
 
     # The orchestrator soul carries the thinking-vs-execution classifier and
@@ -389,7 +389,7 @@ def session_start(payload: dict[str, Any]) -> dict[str, Any]:
 
     reminders = check_audit_reminders(session)
     if reminders:
-        lines += ["", "## Audit reminders", ""]
+        lines += ["", "## Audit reminders — surface each once, then drop it", ""]
         lines += [f"- {r.message}" for r in reminders]
 
     return hookio.additional_context("SessionStart", "\n".join(lines))
