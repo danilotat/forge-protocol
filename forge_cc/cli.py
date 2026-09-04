@@ -8,7 +8,7 @@ without parsing prose.
 Read/write separation is deliberate. `state`, `checkpoint`, `rules`, `report`
 and `canary trend` never mutate anything, so the status skill can show a
 dashboard without consuming a pending checkpoint or silently clearing an
-overdue audit reminder. Mutation is opt-in: `set-mode`, `canary submit`,
+overdue audit reminder. Mutation is opt-in: `set-mode`, `route-mode`, `canary submit`,
 `report --record`, `audit-done`.
 """
 
@@ -86,6 +86,7 @@ def cmd_state(args: argparse.Namespace) -> int:
     return _emit({
         "session_id": session.session_id,
         "current_mode": session.current_mode,
+        "mode_source": session.mode_source,
         "mode_name": mode.name if mode else session.current_mode,
         "mode_description": mode.description if mode else "",
         "message_count": session.message_count,
@@ -121,10 +122,14 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
     previous = session.current_mode
 
     if previous == args.mode:
+        previous_source = session.mode_source
+        session = sm.switch_mode(session.session_id, args.mode, source="user")
         return _emit({
             "previous": previous,
             "current": args.mode,
             "changed": False,
+            "source": session.mode_source,
+            "source_changed": previous_source != session.mode_source,
             "description": modes[args.mode].description,
             "message": f"Already in {args.mode} mode.",
         })
@@ -174,7 +179,7 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
                 )
             forced = True
 
-    session = sm.switch_mode(session.session_id, args.mode)
+    session = sm.switch_mode(session.session_id, args.mode, source="user")
 
     if forced:
         # Auditable rather than silent: a forced relaxation shows up in
@@ -191,11 +196,69 @@ def cmd_set_mode(args: argparse.Namespace) -> int:
         "previous": previous,
         "current": args.mode,
         "changed": True,
+        "source": session.mode_source,
         "description": mode.description,
         "message": f"Switched from {previous} to {args.mode} mode.",
         "input_rules": mode.input_rules,
         "forbidden_behaviors": mode.behaviors.forbidden,
         "write_tools_blocked": args.mode in THINKING_MODES,
+    })
+
+
+def cmd_route_mode(args: argparse.Namespace) -> int:
+    """Automatically enter or move between thinking modes only."""
+    modes = _modes()
+    if not modes:
+        return _fail(f"no mode definitions found in {modes_dir()}")
+    if args.mode == "executor":
+        return _fail("automatic routing to executor is not allowed")
+    if args.mode not in THINKING_MODES or args.mode not in modes:
+        return _fail(
+            "invalid automatic route: "
+            f"{args.mode}. Valid: {', '.join(sorted(THINKING_MODES))}"
+        )
+
+    sm = StateManager()
+    session = sm.get_or_create_session(_session_id(args))
+    previous = session.current_mode
+    if session.mode_source not in {"default", "orchestrator"}:
+        return _fail(
+            f"refusing to override {session.mode_source} mode selection "
+            f"({previous})"
+        )
+
+    if previous == args.mode:
+        session = sm.switch_mode(session.session_id, args.mode, source="orchestrator")
+        return _emit({
+            "previous": previous,
+            "current": args.mode,
+            "changed": False,
+            "source": session.mode_source,
+            "write_tools_blocked": True,
+        })
+
+    current = modes.get(previous)
+    target = modes[args.mode]
+    if current and current.transitions.allowed_to and args.mode not in current.transitions.allowed_to:
+        allowed = ", ".join(sorted(current.transitions.allowed_to))
+        return _fail(
+            f"{previous} mode does not allow switching to {args.mode}. "
+            f"Allowed: {allowed}"
+        )
+    if target.transitions.allowed_from and previous not in target.transitions.allowed_from:
+        allowed = ", ".join(sorted(target.transitions.allowed_from))
+        return _fail(
+            f"{args.mode} mode does not allow switching from {previous}. "
+            f"Allowed sources: {allowed}"
+        )
+
+    session = sm.switch_mode(session.session_id, args.mode, source="orchestrator")
+    return _emit({
+        "previous": previous,
+        "current": args.mode,
+        "changed": previous != args.mode,
+        "source": session.mode_source,
+        "write_tools_blocked": True,
     })
 
 
@@ -439,6 +502,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="leave a thinking mode without a user request; requires a TTY, logged as a violation",
     )
     p_set.set_defaults(func=cmd_set_mode)
+
+    p_route = with_session(
+        sub.add_parser("route-mode", help="automatically route into a thinking mode")
+    )
+    p_route.add_argument("mode", help="forge | anvil | crucible")
+    p_route.set_defaults(func=cmd_route_mode)
 
     p_rules = sub.add_parser("rules", help="print a mode's rules (read-only)")
     p_rules.add_argument("mode")
