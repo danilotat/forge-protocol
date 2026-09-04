@@ -17,6 +17,7 @@ import io
 import json
 import shutil
 import sys
+import time
 
 import pytest
 
@@ -136,6 +137,37 @@ def test_session_start_shows_audit_reminders(isolated_env):
 
     assert "Audit reminders" in context
     assert "canary" in context.lower()
+
+
+# Claude Code drops a hook's `additionalContext` once it grows past roughly
+# 10 KiB, replacing the whole thing with a 2 KB `<persisted-output>` preview —
+# and the hook still exits 0, so an oversized soul silently loses its routing
+# contract instead of failing loudly. The ceiling is unpublished; what is
+# measured is that 9,552 chars reached the model intact and 10,732 did not,
+# truncated just before the orchestrator's routing sequence. Hold the line
+# above the known-good size and well under the known-bad one. The four mode
+# souls are ~6.2 KB each and research-backed, so the orchestrator soul is the
+# part that has to stay small.
+HOST_CONTEXT_BUDGET = 9600
+
+
+@pytest.mark.parametrize("mode", ["executor", *THINKING_MODES])
+def test_session_start_context_fits_the_host_injection_budget(isolated_env, mode):
+    """Worst case: every audit overdue, so the reminder block is at its longest."""
+    _session("s-budget", mode, created_at=time.time() - 400 * 86400)
+
+    context = _context(
+        handlers.session_start({"session_id": "s-budget", "cwd": str(isolated_env)})
+    )
+
+    assert "Mandatory routing sequence" in context, (
+        "the routing contract has to survive into the injected context"
+    )
+    assert len(context) <= HOST_CONTEXT_BUDGET, (
+        f"{mode} SessionStart context is {len(context)} chars; past ~10 KiB the "
+        "host truncates it to a 2 KB preview and the orchestrator loses its "
+        "routing instructions entirely"
+    )
 
 
 # ---------------------------------------------------------------------------
