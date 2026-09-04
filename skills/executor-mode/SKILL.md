@@ -1,6 +1,6 @@
 ---
 name: executor-mode
-description: Switch to Executor mode — normal, friction-free AI operation with full tool access, for mechanical tasks only. Use when the user invokes executor-mode ($executor-mode in Codex, /executor-mode in Claude Code), says "just do it", or needs work where their own judgment is not at stake.
+description: Switch to Executor mode — normal, friction-free AI operation with full tool access, for mechanical tasks only. Use only when the user explicitly invokes executor-mode ($executor-mode in Codex, /executor-mode in Claude Code); semantic matching must never relax a thinking mode.
 ---
 
 # Executor Mode — Standard AI Operation
@@ -21,11 +21,11 @@ Executor mode is standard AI behavior — no friction, no questioning, no checkp
 
 ## Activation
 
-**The switch has already happened.** The `UserPromptSubmit` hook reads the user's own prompt, applies the mode change itself, and injects the new mode's rules into your context — so there is nothing to run here. Do **not** call `forge set-mode`; it would be a redundant shell round-trip and its JSON would be rendered to the user for no reason. If you need the current state for some other purpose, the `forge` CLI is at the absolute path given as `FORGE_CLI:` in the session context.
+Executor activation is user-controlled. Use this skill only when `UserPromptSubmit` says the user selected Executor; the hook has already set source `user` and injected the Executor soul. Do not run `forge set-mode` or `forge route-mode`. If this skill was selected only because a task looks mechanical while a thinking mode is active, stop and ask the user to invoke `executor-mode` themselves.
 
 1. **Report the switch in one line, no ceremony** — "Executor mode: full tool access, no friction. What do you need?" — and get on with the task. This is the one mode where the AI-first pattern is sanctioned, so don't manufacture questions or checkpoints.
 
-3. **Delegate to the `executor` subagent** for a bounded mechanical task, or just do the work directly. The `executor` subagent has the default full tool set, and the `PreToolUse` write-lock that guards Forge, Anvil, and Crucible does not apply here — `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are all available.
+2. **Do the work directly** in the main agent. An `executor` subagent is optional when the host exposes one. The `PreToolUse` write-lock that guards Forge, Anvil, and Crucible does not apply here — `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are all available.
 
 ## When NOT to Use
 
