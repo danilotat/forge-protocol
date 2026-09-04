@@ -48,6 +48,10 @@ manually exercising stateful commands.
 - Auditor errors expose only an exception type, never stderr or secrets.
 - Stop-hook revisions are bounded by `FORGE_MAX_REVISIONS`.
 - The shell write detector remains a narrow guardrail, not a shell parser.
+- A hook's `additionalContext` stays under `HOST_CONTEXT_BUDGET`. Past roughly
+  10 KiB Claude Code replaces the whole payload with a 2 KB preview and still
+  exits 0, so an oversized soul drops the routing contract silently. The mode
+  souls are the bulk; keep `souls/forge-orchestrator.md` lean.
 
 ## Mode definitions
 
