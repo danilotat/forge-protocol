@@ -24,6 +24,7 @@ def test_create_session(sm):
     session = sm.create_session("test-1")
     assert session.session_id == "test-1"
     assert session.current_mode == "executor"
+    assert session.mode_source == "default"
     assert session.message_count == 0
     assert len(session.mode_history) == 1
     assert session.mode_history[0].mode == "executor"
@@ -68,6 +69,29 @@ def test_switch_to_same_mode_is_noop(sm):
     sm.create_session("test-6", initial_mode="forge")
     session = sm.switch_mode("test-6", "forge")
     assert len(session.mode_history) == 1
+
+
+def test_switch_to_same_mode_can_claim_user_ownership(sm):
+    sm.create_session("test-source")
+
+    session = sm.switch_mode("test-source", "executor", source="user")
+
+    assert session.current_mode == "executor"
+    assert session.mode_source == "user"
+    assert len(session.mode_history) == 1
+
+
+def test_state_without_mode_source_loads_as_legacy(sm, state_dir):
+    sm.create_session("old-state")
+    path = state_dir / "sessions" / "old-state.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("mode_source")
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    session = sm.get_session("old-state")
+
+    assert session is not None
+    assert session.mode_source == "legacy"
 
 
 def test_increment_messages(sm):
