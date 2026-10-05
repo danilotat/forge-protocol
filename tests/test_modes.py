@@ -226,7 +226,30 @@ def test_crucible_runs_the_full_stress_test_once_per_idea_set():
 
 
 
-@pytest.mark.parametrize("mode", ["crucible"])
+def test_forge_gates_its_judicial_pass_on_a_new_position():
+    """"Once the user has stated a position" stays true for the whole session.
+
+    As a trigger it re-armed the full steelman-and-attack on every later turn,
+    Forge's version of the per-turn quota that stalled Crucible.
+    """
+    forge = load_mode(MODES_DIR / "forge.yaml")
+
+    assert "steelman" not in " ".join(forge.behaviors.required).lower()
+    judicial = [r for r in forge.behaviors.conditional if "judicial" in r.lower()]
+    assert judicial, "the judicial protocol went missing"
+    assert "new or revised position" in judicial[0].lower()
+
+
+def test_forge_lets_the_saturation_notice_precede_its_questions():
+    """The ordering rule is strict, so the exit must be named in it as protocol."""
+    forge = load_mode(MODES_DIR / "forge.yaml")
+
+    ordering = [b for b in forge.behaviors.required if b.startswith("Lead with questions")]
+    assert ordering, "the ordering rule went missing"
+    assert "saturation notice" in ordering[0]
+
+
+@pytest.mark.parametrize("mode", ["forge", "crucible"])
 def test_questioning_modes_declare_saturation_instead_of_looping(mode):
     rules = load_mode(MODES_DIR / f"{mode}.yaml").behaviors
     conditional = " ".join(rules.conditional).lower()
@@ -239,7 +262,7 @@ def test_questioning_modes_declare_saturation_instead_of_looping(mode):
     assert "verdict" in forbidden, "saturation must not turn into a verdict on the user's thinking"
 
 
-@pytest.mark.parametrize("mode", ["crucible"])
+@pytest.mark.parametrize("mode", ["forge", "crucible"])
 def test_questioning_mode_prompts_carry_the_ledger_contract(mode):
     """The auditor holds replies to the ledger rules, so the prompts must teach them."""
     root = Path(__file__).parent.parent
