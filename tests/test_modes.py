@@ -205,3 +205,45 @@ def test_executor_skill_cannot_be_selected_to_relax_friction():
     assert "use only when the user explicitly invokes" in skill
     assert "semantic matching must never relax" in skill
     assert "route-mode executor" not in skill
+
+
+def test_crucible_runs_the_full_stress_test_once_per_idea_set():
+    """Demanding fresh weaknesses in every reply forces invented objections.
+
+    Once the real objections are answered, a per-turn quota of three new ones
+    can only be met by making some up, and the session never converges. The
+    full pass is gated on a new idea set; later rounds work the ledger.
+    """
+    crucible = load_mode(MODES_DIR / "crucible.yaml")
+
+    required = " ".join(crucible.behaviors.required).lower()
+    for routine in ("steelman", "weaknesses", "hidden assumptions"):
+        assert routine not in required, f"`{routine}` is demanded of every reply again"
+
+    gated = [r for r in crucible.behaviors.conditional if "steelman" in r.lower()]
+    assert gated, "the full stress test went missing"
+    assert "new set of ideas" in gated[0].lower()
+
+
+
+@pytest.mark.parametrize("mode", ["crucible"])
+def test_questioning_modes_declare_saturation_instead_of_looping(mode):
+    rules = load_mode(MODES_DIR / f"{mode}.yaml").behaviors
+    conditional = " ".join(rules.conditional).lower()
+    forbidden = " ".join(rules.forbidden).lower()
+
+    assert "no major ledger item is open" in conditional
+    assert "go deeper" in conditional
+    assert "unchanged for two rounds" in conditional, "a stalled ledger needs an exit too"
+    assert "keep the exchange going" in forbidden
+    assert "verdict" in forbidden, "saturation must not turn into a verdict on the user's thinking"
+
+
+@pytest.mark.parametrize("mode", ["crucible"])
+def test_questioning_mode_prompts_carry_the_ledger_contract(mode):
+    """The auditor holds replies to the ledger rules, so the prompts must teach them."""
+    root = Path(__file__).parent.parent
+    for path in (f"souls/{mode}.md", f"agents/{mode}.md", f"skills/{mode}-mode/SKILL.md"):
+        text = " ".join((root / path).read_text().lower().split())
+        assert "ledger" in text, f"{path} lost the ledger"
+        assert "major questions are clarified" in text, f"{path} lost the saturation exit"
