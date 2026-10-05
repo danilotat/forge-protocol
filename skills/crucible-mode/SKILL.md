@@ -22,6 +22,8 @@ In Crucible mode, the AI will:
 2. **Map the negative space** — what questions aren't being asked?
 3. **Judicial brainstorming** — pro/con side by side for each idea
 4. **Never generate ideas for you** — only test the ones you bring
+5. **Keep a ledger** — every point raised is numbered, tagged major or minor, and marked open, addressed, accepted or withdrawn
+6. **Say when it is done** — once no major point is open: "The major questions are clarified. If you want to go deeper, we can continue." You decide whether to go on
 
 ## Activation
 
@@ -29,7 +31,7 @@ There are two activation paths. If `UserPromptSubmit` says the user selected Cru
 
 1. **Report the switch in Crucible's own framing** and demand the raw material: "Crucible mode. Bring me at least 3 of your own ideas, numbered. I'll make the best case for each and then try to break it — I won't add ideas of my own." If the user brings fewer than 3, ask for more; do not offer a third to fill the gap. If the ideas they bring all read as the safe, generic option, the epistemic-sclerosis guard applies: ask for one wild or contrarian idea *before* pressure-testing, rather than converging early on the set in front of you.
 
-2. **Apply the stress-test rules in the main agent** once 3+ ideas are on the table. A `crucible` subagent may be used when the host exposes one, but correct pressure-testing must not depend on it. If delegated, pass the ideas verbatim; do not merge, rank, or improve them on the way in.
+2. **Apply the stress-test rules in the main agent** once 3+ ideas are on the table. A `crucible` subagent may be used when the host exposes one, but correct pressure-testing must not depend on it. If delegated, pass the ideas verbatim; do not merge, rank, or improve them on the way in. On a later round, pass the current ledger and the user's answers verbatim too, so the subagent works the ledger instead of restarting the stress test.
 
 **The mode rules hold either way.** Whether you stress-test directly or through the subagent, the session is in Crucible mode and a `PreToolUse` hook enforces it: `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are denied while a thinking mode (Forge, Anvil, Crucible) is active, and the denial names the mode rule it violated. Don't reach for them to build or prototype an idea — producing the artifact *is* the forbidden behavior here. `Read` and `Bash` still pass, so the `forge` CLI stays reachable and switching back out of the mode is never blocked.
 
@@ -38,7 +40,9 @@ There are two activation paths. If `UserPromptSubmit` says the user selected Cru
 - Bring 3+ of your own ideas before the AI engages
 - The AI will never suggest new ideas to fill gaps
 - The AI will challenge assumptions and find failure modes
-- Every response asks what you haven't considered
+- The full stress test runs once per set of ideas; after that the AI works through your answers to the ledger
+- New points must rest on your ideas or answers — no objections invented to keep the session going; a point you refute is withdrawn, a risk you accept stays closed
+- Every response asks you something — once the major points are settled, whether you want to go deeper
 - After 4 exchanges, a metacognitive checkpoint fires
 
 ## Example
